@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v6.7.1 · 移动端降级版 (2026-07-24)</title>
+    <title>星渊城 v6.8 · PBR showcase + 真实海面 (2026-07-24)</title>
     <script>
     // v6.7.1: 移动端自动降级 + 全局 Promise 兜底（消除 Chromium 红条）
     (function(){
@@ -674,6 +674,22 @@
             { key: 'car_minivan',   url: 'assets/models/vehicles/car3_minivan.glb' },
             { key: 'car_bigset',    url: 'assets/models/vehicles/cars_big_set.glb' },
             { key: 'car_mustang',   url: 'assets/models/vehicles/mustang.glb' },
+            // v6.8 新增：Khronos PBR Showcase 高质量模型
+            { key: 'pbr_ferrari',   url: 'assets/models/pbr_assets/Ferrari.glb' },
+            { key: 'pbr_car_concept', url: 'assets/models/pbr_assets/CarConcept.glb' },
+            { key: 'pdr_helmet',    url: 'assets/models/pbr_assets/DamagedHelmet.glb' },
+            { key: 'pbr_lantern',   url: 'assets/models/pbr_assets/Lantern.glb' },
+            { key: 'pbr_boombox',   url: 'assets/models/pbr_assets/BoomBox.glb' },
+            { key: 'pbr_avocado',   url: 'assets/models/pbr_assets/Avocado.glb' },
+            { key: 'pbr_camera',    url: 'assets/models/pbr_assets/AntiqueCamera.glb' },
+            { key: 'pbr_dragon',    url: 'assets/models/pbr_assets/DragonAttenuation.glb' },
+            { key: 'pbr_brainstem', url: 'assets/models/pbr_assets/BrainStem.glb' },
+            { key: 'pbr_fish',      url: 'assets/models/pbr_assets/BarramundiFish.glb' },
+            { key: 'pbr_horse',     url: 'assets/models/pbr_assets/Horse.glb' },
+            { key: 'pbr_tokyo',     url: 'assets/models/pbr_assets/LittlestTokyo.glb' },
+            { key: 'pbr_flamingo',  url: 'assets/models/pbr_assets/Flamingo.glb' },
+            { key: 'pbr_stork',     url: 'assets/models/pbr_assets/Stork.glb' },
+            { key: 'pbr_cesium',    url: 'assets/models/pbr_assets/CesiumMan.glb' },
             // 场景
             { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb' },
             // 角色
@@ -714,6 +730,15 @@
                                 roughness: 0.8,
                             });
                             child.material = newMat;
+                        }
+                        // v6.8: PBR 材质自动绑定 envMap，envMapIntensity 给个合理值
+                        if (child.material && child.material.isMeshStandardMaterial) {
+                            child.material.envMap = scene.environment || null;
+                            child.material.envMapIntensity = child.material.envMapIntensity || 1.0;
+                            // Khronos PBR showcase 用 KTX2 内嵌 PBR，材质已是 PBR；非 PBR 给个 0.6 强度
+                            if (it.key.startsWith('pbr_') || it.key.startsWith('pdr_')) {
+                                child.material.envMapIntensity = 1.2;
+                            }
                         }
                     }
                 });
@@ -3573,6 +3598,117 @@
         scene.add(water);
         window._water = water;
 
+        // v6.8: Kimi 风格 Phillips 频谱水面（中央 80x80 大水面）
+        // 8 段波形叠加 + Fresnel 反射 + 泡沫 + 浪尖高光
+        const SEA_SIZE = 200, SEA_SEG = 96;
+        const seaGeo = new THREE.PlaneGeometry(SEA_SIZE, SEA_SIZE, SEA_SEG, SEA_SEG);
+        seaGeo.rotateX(-Math.PI/2);
+        const seaMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uCamPos: { value: new THREE.Vector3() },
+                uSunDir: { value: new THREE.Vector3(0.4, 0.7, 0.3).normalize() },
+                uDeep:   { value: new THREE.Color(0x001020) },
+                uShal:   { value: new THREE.Color(0x1078a0) },
+                uFoam:   { value: new THREE.Color(0xeaf6ff) },
+                uEnvMap: { value: null },
+                uEnvIntensity: { value: 1.0 },
+                uNight: { value: 0.0 },
+            },
+            vertexShader: `
+                uniform float uTime;
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vFoam;
+                // 8 段频谱
+                vec2 dk[8]; vec2 wa[8];
+                float waveGroup(vec2 xz, float t) {
+                    return 0.72 + 0.28*sin(dot(xz,vec2(0.018,0.012))-t*0.25) * sin(dot(xz,vec2(-0.009,0.021))+t*0.18);
+                }
+                float seaH(vec2 p, float t) {
+                    float g = waveGroup(p,t), h = 0.0;
+                    for(int i=0;i<8;i++){
+                        float ph = dot(dk[i],p) + t*wa[i].x;
+                        h += wa[i].y * g * cos(ph);
+                    }
+                    return h;
+                }
+                void main() {
+                    vec3 pos = position;
+                    float t = uTime;
+                    // 初始化 8 段波形（与 Kimi 一致）
+                    dk[0]=vec2( 0.1089, 0.5445); wa[0]=vec2(2.10,0.30);
+                    dk[1]=vec2(-0.2180, 0.4632); wa[1]=vec2(2.65,0.22);
+                    dk[2]=vec2( 0.4905, 0.3270); wa[2]=vec2(3.42,0.16);
+                    dk[3]=vec2(-0.4360,-0.2452); wa[3]=vec2(4.31,0.10);
+                    dk[4]=vec2( 0.2998,-0.3703); wa[4]=vec2(5.42,0.07);
+                    dk[5]=vec2(-0.0817, 0.5341); wa[5]=vec2(6.71,0.05);
+                    dk[6]=vec2( 0.4088, 0.1363); wa[6]=vec2(8.18,0.04);
+                    dk[7]=vec2(-0.3545,-0.4088); wa[7]=vec2(9.86,0.03);
+                    float h = seaH(pos.xz, t);
+                    // 法线（中心差分）
+                    float e = 0.5;
+                    float hx = seaH(pos.xz + vec2(e,0.0), t);
+                    float hz = seaH(pos.xz + vec2(0.0,e), t);
+                    vec3 n = normalize(vec3(h-hx, e, h-hz));
+                    pos.y += h;
+                    vec4 wp = modelMatrix * vec4(pos,1.0);
+                    vWorldPos = wp.xyz;
+                    vNormal = normalize((modelMatrix * vec4(n,0.0)).xyz);
+                    // 浪尖泡沫因子
+                    vFoam = smoothstep(0.45, 0.95, h*0.5+0.5) * smoothstep(0.3, 0.8, length(vec2(h-hx, h-hz))/(2.0*e));
+                    gl_Position = projectionMatrix * viewMatrix * wp;
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime;
+                uniform vec3 uCamPos;
+                uniform vec3 uSunDir;
+                uniform vec3 uDeep;
+                uniform vec3 uShal;
+                uniform vec3 uFoam;
+                uniform samplerCube uEnvMap;
+                uniform float uEnvIntensity;
+                uniform float uNight;
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vFoam;
+                // ACES tonemap
+                vec3 aces(vec3 x){ return clamp(x*(2.51*x+0.03)/(x*(2.43*x+0.59)+0.14), 0.0, 1.0); }
+                void main() {
+                    vec3 V = normalize(uCamPos - vWorldPos);
+                    vec3 N = normalize(vNormal);
+                    float NdotV = max(dot(N,V), 0.0);
+                    // Fresnel
+                    float F = 0.02 + 0.98 * pow(1.0-NdotV, 5.0);
+                    // 反射（取 environment 简化版：菲涅尔 + 天色 + 海色混合）
+                    vec3 R = reflect(-V, N);
+                    vec3 skyCol = mix(uShal*0.7, vec3(0.6, 0.78, 1.0) * (1.0 - uNight*0.8), max(R.y*0.5+0.5, 0.0));
+                    vec3 waterCol = mix(uDeep, uShal, smoothstep(-1.0, 1.0, vWorldPos.y*0.4));
+                    // 太阳高光
+                    vec3 H = normalize(uSunDir + V);
+                    float spec = pow(max(dot(N,H),0.0), 220.0) * (1.0 - uNight*0.7);
+                    vec3 sunCol = vec3(1.0, 0.92, 0.78) * spec * 14.0;
+                    // 合成
+                    vec3 col = mix(waterCol, skyCol, F*0.9);
+                    col += sunCol;
+                    // 泡沫
+                    col = mix(col, uFoam, clamp(vFoam*0.85, 0.0, 1.0));
+                    // 距离衰减
+                    float dist = length(uCamPos - vWorldPos);
+                    col = mix(col, skyCol*0.6, smoothstep(60.0, 180.0, dist));
+                    col = aces(col * 1.1);
+                    gl_FragColor = vec4(col, 1.0);
+                }
+            `,
+            side: THREE.FrontSide,
+            transparent: false,
+        });
+        const sea = new THREE.Mesh(seaGeo, seaMat);
+        sea.position.set(0, -0.8, 0);
+        scene.add(sea);
+        window._sea = sea;
+
         buildRoads();
         buildLandmarks();
         buildBuildings();
@@ -3619,6 +3755,26 @@
             // scale 0.4 适配 ~200x200m 范围；放偏远角落避免穿插
             placeG('scene_cyberpunk',  280, -180, Math.PI/4, 0.4);
             placeG('scene_cyberpunk', -300,  300, -Math.PI/4, 0.3);
+
+            // v6.8: PBR Showcase 展览圈（中央广场）—— 真实高质量模型演示
+            // Ferrari + 头盔 + 灯笼 + 音响 + 牛油果 + 相机 + 龙 + 脑干 + 鱼 + 马 + 东京 + 火烈鸟 + 鹳 + 雪怪
+            const pbrScale = 1.0;
+            placeG('pbr_ferrari',   -10, -5, Math.PI/2, pbrScale);
+            placeG('pbr_car_concept', 10, -5, -Math.PI/2, 0.9);
+            placeG('pdr_helmet',     0,  10, 0, 3.0);
+            placeG('pbr_lantern',   -8,  14, 0, 0.8);
+            placeG('pbr_boombox',    8,  14, Math.PI, 1.2);
+            placeG('pbr_avocado',  -15,  18, 0, 2.0);
+            placeG('pbr_camera',    15,  18, Math.PI/2, 1.5);
+            placeG('pbr_dragon',     0,  30, 0, 0.06);  // 龙原模型大，缩到 0.06
+            placeG('pbr_brainstem', -20,  30, 0, 0.8);
+            placeG('pbr_fish',      20,  30, Math.PI/4, 0.8);
+            placeG('pbr_horse',    -20, -20, 0, 0.4);
+            placeG('pbr_flamingo',  20, -20, 0, 0.4);
+            placeG('pbr_stork',    -25,  40, 0, 0.4);
+            placeG('pbr_cesium',    25,  40, 0, 0.4);
+            // 东京小景摆远处
+            placeG('pbr_tokyo',     0, 100, 0, 0.015);  // 整个东京 150m，缩 0.015 适配 2.25m
         }
     }
 
@@ -3695,6 +3851,17 @@
             updateHUD();
             updateFPS(dt);
             if(window._water) window._water.material.uniforms.time.value += dt;
+            // v6.8: 海面动画
+            if(window._sea && window._sea.material.uniforms){
+                const u = window._sea.material.uniforms;
+                u.uTime.value += dt;
+                if(camera) u.uCamPos.value.copy(camera.position);
+                // 夜晚时拉高 night 系数
+                if(window._sun) {
+                    const up = Math.max(0, window._sun.position.y);
+                    u.uNight.value = THREE.MathUtils.clamp(1.0 - up/8.0, 0, 1);
+                }
+            }
             if(window._skyDome) window._skyDome.material.uniforms.uTime.value += dt;
             // emissive 呼吸（祈年殿风格）
             if(window._topBall){
