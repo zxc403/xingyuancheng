@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
-    <title>星渊城 v6.0 · 终极融合版</title>
+    <title>星渊城 v6.1 · GTA5 真实感</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
         body { overflow:hidden; background:#0a0e14; font-family:'PingFang SC','Microsoft YaHei',sans-serif; color:#fff; touch-action:none; position:fixed; width:100%; height:100%; top:0; left:0; }
@@ -187,6 +187,7 @@
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';  // v6.1: GLB 真实模型
 
     // ---- 工具 ----
     const U = {
@@ -320,11 +321,11 @@
         return h;
     }
 
-    // ---- 真实 PBR 纹理加载器（从 /assets/textures/ 加载） ----
-    // 4 套 Poly Haven 真实纹理：asphalt / forest / plank / rocky
+    // ---- 真实 PBR 纹理加载器（v6.1 扩展：从 /assets/textures/ 加载） ----
+    // v6.1: 扩展到 8 套 (4 套 2K 原 + 4 套 4K 新)
     async function loadRealTextures() {
-        const sets = ['asphalt', 'forest', 'plank', 'rocky'];
-        const chs = ['diff', 'nor', 'rough', 'ao'];
+        const sets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron'];
+        const chs = ['diff', 'nor', 'rough'];  // v6.1: AO 缺失会 fall through
         const out = {};
 
         for (const setName of sets) {
@@ -356,23 +357,91 @@
         return out;
     }
 
-    // ---- 真实 HDR 加载器（白天环境光） ----
+    // ---- 真实 HDR 加载器（v6.1 升级：4K 多云 + 1K 备用） ----
     async function loadRealHDR() {
         return new Promise((resolve, reject) => {
             const loader = new THREE.RGBELoader();
-            loader.load('assets/hdri/day_quarry.hdr', (hdrTex) => {
+            // v6.1: 优先加载 4K kloppenheim_06 (GTA5 风格黄昏)
+            loader.load('assets/hdri/kloppenheim_06_4k.hdr', (hdrTex) => {
                 hdrTex.mapping = THREE.EquirectangularReflectionMapping;
                 const pmrem = new THREE.PMREMGenerator(renderer);
                 const envRT = pmrem.fromEquirectangular(hdrTex);
                 pmrem.dispose();
                 hdrTex.dispose();
-                console.log('[RealHDR] loaded day_quarry.hdr');
+                console.log('[RealHDR] loaded 4K kloppenheim_06 (GTA5 黄昏多云)');
                 resolve(envRT.texture);
             }, undefined, (err) => {
-                console.warn('[RealHDR] failed', err);
-                reject(err);
+                // Fallback: 1K day_quarry
+                console.warn('[RealHDR] 4K failed, trying 1K', err);
+                loader.load('assets/hdri/day_quarry.hdr', (hdrTex) => {
+                    hdrTex.mapping = THREE.EquirectangularReflectionMapping;
+                    const pmrem = new THREE.PMREMGenerator(renderer);
+                    const envRT = pmrem.fromEquirectangular(hdrTex);
+                    pmrem.dispose();
+                    hdrTex.dispose();
+                    console.log('[RealHDR] fallback to 1K day_quarry');
+                    resolve(envRT.texture);
+                }, undefined, (err2) => {
+                    console.warn('[RealHDR] failed both', err2);
+                    reject(err2);
+                });
             });
         });
+    }
+
+    // ---- 真实 GLB 模型加载器（v6.1 新增） ----
+    // 加载建筑/车辆/角色真模型，缓存到 window._realModels
+    async function loadRealModels() {
+        if (!window._realModels) window._realModels = {};
+        const loader = new GLTFLoader();
+        const list = [
+            // 建筑
+            { key: 'building_city', url: 'assets/models/buildings/city_building.glb' },
+            { key: 'building_block', url: 'assets/models/buildings/city_block.glb' },
+            // 车辆
+            { key: 'car_truck',     url: 'assets/models/vehicles/truck.glb' },
+            { key: 'car_dragster',  url: 'assets/models/vehicles/dragster.glb' },
+            { key: 'car_minivan',   url: 'assets/models/vehicles/minivan.glb' },
+            { key: 'car_bigset',    url: 'assets/models/vehicles/big_set.glb' },
+            { key: 'car_mustang',   url: 'assets/models/vehicles/mustang.glb' },
+            // 场景
+            { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb' },
+            // 角色
+            { key: 'char_barbarian', url: 'assets/models/characters/Barbarian.glb' },
+            { key: 'char_knight',    url: 'assets/models/characters/Knight.glb' },
+            { key: 'char_mage',      url: 'assets/models/characters/Mage.glb' },
+            { key: 'char_rogue',     url: 'assets/models/characters/Rogue.glb' },
+            { key: 'char_rogue_h',   url: 'assets/models/characters/Rogue_Hooded.glb' },
+        ];
+        for (const it of list) {
+            try {
+                const gltf = await loader.loadAsync(it.url);
+                const obj = gltf.scene || gltf.scenes[0];
+                // 自动遍历启用阴影 + 调整材质到 MeshStandardMaterial
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        // 升级材质到 PBR Standard (如果原材质不是)
+                        if (child.material && !child.material.isMeshStandardMaterial) {
+                            const oldMat = child.material;
+                            const newMat = new THREE.MeshStandardMaterial({
+                                map: oldMat.map || null,
+                                color: oldMat.color || 0xffffff,
+                                metalness: 0.1,
+                                roughness: 0.8,
+                            });
+                            child.material = newMat;
+                        }
+                    }
+                });
+                window._realModels[it.key] = obj;
+                console.log('[RealModel] loaded', it.key);
+            } catch (e) {
+                console.warn('[RealModel] failed', it.key, e);
+            }
+        }
+        return window._realModels;
     }
 
     // ---- 程序生成纹理（备用，回退方案） ----
@@ -1279,9 +1348,13 @@
         const bw=2, bh=(type==='suv'?1.6:1.3), bl=4.5;
         const bodyMat = new THREE.MeshPhysicalMaterial({
             color: vt.color,
-            metalness: 0.6,
-            roughness: 0.3,
-            clearcoat: 0.5
+            metalness: 0.7,
+            roughness: 0.25,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.03,
+            iridescence: 0.4,        // v6.1: GTA5 虹彩车漆
+            iridescenceIOR: 1.3,
+            envMapIntensity: 1.5
         });
         const body = new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bl), bodyMat);
         body.position.y = bh/2+0.4;
@@ -2829,6 +2902,38 @@
         spawnPickups();
         spawnGlow();
         spawnParticles();
+
+        // ===== v6.1 真实 GLB 模型摆放到场景 =====
+        // 如果已加载真模型，在地图中心摆出 demo 建筑群
+        if (window._realModels) {
+            const models = window._realModels;
+            // 在 (200, 0, 200) 附近摆 4 个建筑 + 1 个城市街区
+            const placeG = (key, x, z, ry=0, scale=1) => {
+                if (models[key]) {
+                    const m = models[key].clone();
+                    m.position.set(x, 0, z);
+                    m.rotation.y = ry;
+                    m.scale.setScalar(scale);
+                    scene.add(m);
+                }
+            };
+            placeG('building_city',  220,  220, 0, 1.5);
+            placeG('building_city', -220,  220, Math.PI/4, 1.2);
+            placeG('building_block',  220, -220, Math.PI/2, 0.8);
+            placeG('building_block', -220, -220, Math.PI, 1.0);
+            // 5 辆车分散摆
+            placeG('car_mustang',  180,   0, Math.PI/2, 1.0);
+            placeG('car_truck',    -180,   0, -Math.PI/2, 1.0);
+            placeG('car_minivan',  0,   180, 0, 1.0);
+            placeG('car_dragster', 0,  -180, Math.PI, 1.0);
+            placeG('car_bigset',   300,  300, Math.PI/4, 1.0);
+            // 5 个 RPG 角色分散摆（演示用，v6.2 替换胶囊体）
+            placeG('char_barbarian',  150, 100, 0, 1.0);
+            placeG('char_knight',    -150, 100, Math.PI, 1.0);
+            placeG('char_mage',       150, -100, Math.PI/2, 1.0);
+            placeG('char_rogue',     -150, -100, -Math.PI/2, 1.0);
+            placeG('char_rogue_h',   100, 150, Math.PI/4, 1.0);
+        }
     }
 
     // ===== 相机更新 =====
@@ -2906,6 +3011,12 @@
 
     // ===== 启动 =====
     async function init() {
+        // v6.1 横屏锁定提示 + 强制横屏（如果支持）
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock('landscape').catch(()=>{});
+            }
+        } catch(_){}
         // 错误显示屏：把 WebGL/JS 错误吐到屏幕右下角，方便手机调试
         try {
             const errBox = document.createElement('div');
@@ -2934,6 +3045,10 @@
             });
             if (realHDR) scene.environment = realHDR;
             window._realHDR = realHDR;
+            if(lt) lt.textContent = '加载真实 3D 模型...';
+            await loadRealModels().catch(e => {
+                console.warn('[Init] real models failed, use procedural', e);
+            });
             if(lt) lt.textContent = '构建城市...';
             buildWorld();
         } catch(e){
