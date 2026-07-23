@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v6.1.2 · GTA5 真实感 (2026-07-23 13:31)</title>
+    <title>星渊城 v6.1.4 · 修复卡死版 (2026-07-23 15:50)</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
         body { overflow:hidden; background:#0a0e14; font-family:'PingFang SC','Microsoft YaHei',sans-serif; color:#fff; touch-action:none; position:fixed; width:100%; height:100%; top:0; left:0; }
@@ -3018,12 +3018,10 @@
 
     // ===== 启动 =====
     async function init() {
-        // v6.1 横屏锁定提示 + 强制横屏（如果支持）
-        try {
-            if (screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock('landscape').catch(()=>{});
-            }
-        } catch(_){}
+        // v6.1.4: 强制横屏移到一个按钮，**不在 init 阶段调用**
+        // （Android Edge 兼容性问题 + 不阻塞首屏）
+        // 用户可以点击右上角"横屏"按钮手动锁定
+
         // 错误显示屏：把 WebGL/JS 错误吐到屏幕右下角，方便手机调试
         try {
             const errBox = document.createElement('div');
@@ -3103,8 +3101,9 @@
                     if (pb) pb.style.display = 'none';
                 } catch(_){}
             }, 2000);
-            return;
         }
+        // v6.1.4: 关键修复！移除 finally 里错误的 return
+        // 让以下 initInput / AudioSys / HUD 全部正常执行
         try { initInput(); } catch(e){ console.warn('initInput', e); }
         try { AudioSys.init(); } catch(e){ console.warn('AudioSys', e); }
         updateHUD();
