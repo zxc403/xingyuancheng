@@ -299,11 +299,16 @@
     import { Input as InputModule } from './src/core/Input.js';
     // v6.10.3: 抽离 Player 实体
     import { Player as PlayerModule } from './src/entities/Player.js';
+    // v6.10.4: 抽离 NPC + Vehicle 实体
+    import { NPC as NPCModule } from './src/entities/NPC.js';
+    import { Vehicle as VehicleModule } from './src/entities/Vehicle.js';
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
     window.__game.input = new InputModule();
     window.__game.player = new PlayerModule();
+    window.__game.NPC = NPCModule;
+    window.__game.Vehicle = VehicleModule;
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     // 用相对路径预检 GLTFLoader 是否存在
@@ -3907,7 +3912,10 @@
         requestAnimationFrame(animate);
         const dt = Math.min(clock.getDelta(), 0.05);
         // v6.6: 更新所有 NPC 动画 mixer
-        if (window._npcMixers) {
+        // v6.10.4: 委托给 NPC 模块
+        if (window.__game && window.__game.NPC) {
+            window.__game.NPC.updateAll(dt);
+        } else if (window._npcMixers) {
             for (let i = 0; i < window._npcMixers.length; i++) {
                 try { window._npcMixers[i].update(dt); } catch(e){}
             }

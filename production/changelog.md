@@ -1,5 +1,22 @@
 # Changelog
 
+## v6.10.4 — 抽离 NPC + Vehicle 实体（commit 5 of 7）
+- ✅ `src/entities/NPC.js` 从占位升级为完整 NPC 类
+- ✅ `NPC.spawn(type, x, z, custom)` 工厂方法 - clone GLB + 按 type.beh 选 Soldier/Xbot/Barbarian + 染色 + AnimationMixer
+- ✅ `NPC._spawnFallback()` - GLB 不可用时用胶囊
+- ✅ `NPC.updateAnim(dt)` - 单个 NPC 动画状态机
+- ✅ `NPC.updateAll(dt)` - 批量更新所有 NPC 动画（替代 window._npcMixers 列表）
+- ✅ `NPC.clear()` - 场景重置时清空列表
+- ✅ `src/entities/Vehicle.js` 从占位升级为完整 Vehicle 类
+- ✅ `Vehicle.spawn(scene, model, x, z, yaw)` - 程序几何车身 + 4 轮 + 警车红蓝灯
+- ✅ `Vehicle.findNearest(pos, maxDist)` - 找最近可进入的载具
+- ✅ `Vehicle.setDriver(player)` - 进入/离开载具
+- ✅ index.html animate 循环 NPC 动画更新委托给 NPC.updateAll
+- ⏸ spawnNPCs() 仍在 index.html（依赖 types/areas/npcNames/npcCtx 大量数据）
+- ⏸ updateNPCs() 大函数（200+ 行 AI 决策）尚未迁移 - 留到 v6.11 AI 模块
+- ⏸ 车辆物理（Rapier 动力学）尚未接入 - 留到 v6.11
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.3 — 抽离 Player 实体（commit 4 of 7）
 - ✅ `src/entities/Player.js` 从占位升级为完整玩家实体类
 - ✅ `spawn(scene)` - clone Xbot + 染色 + AnimationMixer 注入
