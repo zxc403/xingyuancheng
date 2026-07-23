@@ -1,6 +1,12 @@
 # Changelog
 
-## v6.9.1 — 修复"玩家根本动不了" + GitHub 资源库
+## v6.9.2 — 移动端点击 blocker 没反应修复
+- 🔥 移动端根本点不到 blocker：之前 `blocker` 全屏遮罩在移动端永远显示, 但 `touchCtrl` 要等 `initInput` 才激活
+- ✅ 修复: 在 `init()` 最早期就检测 `isMobile`, 直接隐藏 blocker + 显示 touchCtrl + gameStarted=true
+- ✅ 移动端不再尝试 `requestPointerLock()` (移动浏览器本来就不支持)
+- ✅ 12 秒兜底只对 PC 生效 (移动端早期已启动)
+
+## v6.9.1 — 修复"玩家根本动不了" + GitHub 灵感库资源库
 - 🔥 **重大修复**: 玩家移动不了 = `blocker` 被 v6.1.1 兜底逻辑强制 `display:none` 但 `gameStarted` 仍为 false, 导致 `updatePlayer` 永远不被调用
   - 移除 `finally` 里强制隐藏 blocker 的代码
   - `init` 成功后自动 `gameStarted = true` + 隐藏 blocker

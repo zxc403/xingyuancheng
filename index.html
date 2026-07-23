@@ -3184,9 +3184,12 @@
         document.addEventListener('mousedown', e=>{ if(!gameStarted||gamePaused) return; if(e.button===0) shoot(); });
         document.addEventListener('pointerlockchange', ()=> isPointerLocked = document.pointerLockElement===renderer.domElement);
         document.addEventListener('keydown', e=>{ if(e.key==='Escape' && gameStarted && !player.isDead && !player.isBusted) gamePaused=!gamePaused; });
+        // v6.9.2: touchCtrl 已在 init 早期被激活, 这里只补 initTouch() 绑定事件
+        // 双重保险: 如果早期没激活 (PC), 在这里也跑一次
         const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
         if(isTouch){
-            document.getElementById('touchCtrl').classList.add('active');
+            const tc = document.getElementById('touchCtrl');
+            if (tc && !tc.classList.contains('active')) tc.classList.add('active');
             initTouch();
         }
     }
@@ -4024,6 +4027,23 @@
 
     // ===== 启动 =====
     async function init() {
+        // v6.9.2: 最早阶段检测移动端 - 直接隐藏 blocker, 让 touchCtrl 接管
+        // 修复: 之前移动端必须点 blocker, 但 touchCtrl 是 display:none (initInput 才显示), 用户看到遮罩无法点任何东西
+        try {
+            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+                             (window.innerWidth < 900 && 'ontouchstart' in window);
+            if (isMobile) {
+                const blocker = document.getElementById('blocker');
+                if (blocker) blocker.style.display = 'none';
+                const tc = document.getElementById('touchCtrl');
+                if (tc) tc.classList.add('active');
+                // 移动端直接进入游戏, 不需要点 blocker
+                gameStarted = true;
+                gamePaused = false;
+                console.log('[v6.9.2] 移动端检测 - 自动进入游戏, touchCtrl 已激活');
+            }
+        } catch(e) { console.warn('[v6.9.2] mobile detect', e); }
+
         // v6.1.4: 强制横屏移到一个按钮，**不在 init 阶段调用**
         // （Android Edge 兼容性问题 + 不阻塞首屏）
         // 用户可以点击右上角"横屏"按钮手动锁定
@@ -4165,14 +4185,21 @@
             gameStarted = true;
             gamePaused = false;
             showNotif('欢迎来到长沙！WASD移动，鼠标视角，T接任务');
-            try { renderer.domElement.requestPointerLock(); } catch(_){}
+            // v6.9.2: 移动端不尝试 requestPointerLock (会失败)
+            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            if (!isMobile) {
+                try { renderer.domElement.requestPointerLock(); } catch(_){}
+            }
         } else if(player.isDead || player.isBusted){
             respawn();
         }
     });
 
     // v6.9.1: 修复 - 12秒兜底自动启动, 避免 init 完成但用户没点 blocker 导致玩家永远动不了
+    // v6.9.2: 移动端已经在 init 早期就 gameStarted=true, 这里只兜 PC
     setTimeout(() => {
+        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+        if (isMobile) return;  // 移动端不需兜底
         if (!gameStarted && typeof player !== 'undefined' && player && typeof scene !== 'undefined' && scene) {
             const blocker = document.getElementById('blocker');
             if (blocker) blocker.style.display = 'none';
