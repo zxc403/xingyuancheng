@@ -1,5 +1,15 @@
 # Changelog
 
+## v6.10.1 — 抽离 Renderer 模块（commit 2 of 7）
+- ✅ `src/core/Renderer.js` 从占位升级为完整状态容器
+- ✅ `attach({scene,camera,renderer,composer,clock,isMobile})` 接收 index.html 已建好的 Three.js 对象
+- ✅ 提供 `tick()` / `onResize()` / `updateFPS()` 三个核心接口
+- ✅ `syncGlobals()` 保持 window.scene / window.camera / window.renderer 全局兼容
+- ✅ index.html initEngine 末尾加挂 Renderer：scene/camera/renderer/composer/clock/isMobile 全部传入
+- ⏸ index.html 主体代码未删 - commit 7 才把 initEngine 整段迁走
+- ⏸ Renderer 主循环渲染部分暂未接管 - v6.10.7 升级 Three.js 时一起做
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.0 — src/ 模块化骨架（commit 1 of 7）
 - ✅ 建立 `src/` 目录结构（6 个模块：core/entities/ai/physics/ui/assets）
 - ✅ 创建 15 个占位文件，每个都标注了 v6.10.x 哪一步会填充真实逻辑

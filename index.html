@@ -293,6 +293,11 @@
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    // v6.10.1: 抽离 Renderer 模块
+    import { Renderer as RendererModule } from './src/core/Renderer.js';
+    // 全局暴露给其他 src/ 模块使用
+    window.__game = window.__game || {};
+    window.__game.renderer = new RendererModule();
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     // 用相对路径预检 GLTFLoader 是否存在
@@ -3643,6 +3648,15 @@
         }
 
         clock = new THREE.Clock();
+
+        // v6.10.1: 加挂 Renderer 模块 - 状态容器
+        if (window.__game && window.__game.renderer) {
+            window.__game.renderer.attach({
+                scene, camera, renderer, composer, clock, isMobile
+            });
+            window.__game.renderer.syncGlobals();
+            console.log('[v6.10.1] Renderer 模块加挂完成');
+        }
     }
 
     // ===== 构建世界（完整） =====
