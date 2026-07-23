@@ -297,10 +297,13 @@
     import { Renderer as RendererModule } from './src/core/Renderer.js';
     // v6.10.2: 抽离 Input 模块
     import { Input as InputModule } from './src/core/Input.js';
+    // v6.10.3: 抽离 Player 实体
+    import { Player as PlayerModule } from './src/entities/Player.js';
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
     window.__game.input = new InputModule();
+    window.__game.player = new PlayerModule();
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     // 用相对路径预检 GLTFLoader 是否存在
@@ -773,96 +776,16 @@
     // ---- v6.9: 玩家 GLB 身体（char_xbot / char_soldier 二选一，默认 Xbot）----
     // 在 _realModels 加载完成后调用一次，把 GLB clone + AnimationMixer 挂到 player
     function createPlayerMesh() {
-        if (player.mesh) return;  // 幂等
-        const key = 'char_xbot';
-        if (!window._realModels || !window._realModels[key]) {
-            console.warn('[createPlayerMesh] char_xbot 未加载，使用兜底胶囊');
-            const fallback = new THREE.Group();
-            const body = new THREE.Mesh(
-                new THREE.CapsuleGeometry(0.28, 0.7, 4, 12),
-                new THREE.MeshStandardMaterial({color: 0x4488cc, roughness: 0.5, metalness: 0.1})
-            );
-            body.position.y = 0.9;
-            body.castShadow = true;
-            fallback.add(body);
-            const head = new THREE.Mesh(
-                new THREE.SphereGeometry(0.18, 12, 8),
-                new THREE.MeshStandardMaterial({color: 0xe8c8a0, roughness: 0.6})
-            );
-            head.position.y = 1.65;
-            head.castShadow = true;
-            fallback.add(head);
-            player.mesh = fallback;
-            player.mixer = null;
-            player.acts = null;
-            return;
-        }
-        try {
-            const charG = window._realModels[key].clone(true);
-            // 归一尺寸到 1.7m 身高
-            const box = new THREE.Box3().setFromObject(charG);
-            const size = new THREE.Vector3(); box.getSize(size);
-            const targetH = 1.7;
-            const s = targetH / size.y;
-            charG.scale.set(s, s, s);
-            const center = new THREE.Vector3(); box.getCenter(center);
-            charG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
-            charG.traverse(c => {
-                if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }
-            });
-            // v6.9: 玩家 Xbot 染色（衣服蓝色 Beta_HighLimbsGeoSG2，皮肤保留）
-            const tint = new THREE.Color(0x4488ff);
-            charG.traverse(c => {
-                if (!c.isMesh || !c.material) return;
-                const matName = (c.material.name) || '';
-                if (/Beta_HighLimbsGeoSG2|Beta_HighLimbs/i.test(matName)) {
-                    c.material = c.material.clone();
-                    const cc = c.material.color;
-                    if (cc && cc.r !== undefined) {
-                        cc.r = tint.r; cc.g = tint.g; cc.b = tint.b;
-                    } else {
-                        c.material.color = tint.clone();
-                    }
-                }
-            });
-            // AnimationMixer
-            const src = window._realModelsSrc && window._realModelsSrc[key];
-            if (src && src.animations && src.animations.length) {
-                const mixer = new THREE.AnimationMixer(charG);
-                const findAnim = kw => src.animations.find(a => a.name && a.name.toLowerCase().includes(kw));
-                const idle = findAnim('idle') || findAnim('breath') || src.animations[0];
-                const walk = findAnim('walk') || findAnim('walking') || idle;
-                const run  = findAnim('run')  || findAnim('jog')   || walk;
-                const aI = mixer.clipAction(idle); aI.setLoop(THREE.LoopRepeat, Infinity);
-                const aW = mixer.clipAction(walk); aW.setLoop(THREE.LoopRepeat, Infinity);
-                const aR = mixer.clipAction(run);  aR.setLoop(THREE.LoopRepeat, Infinity);
-                aI.play();
-                player.mixer = mixer;
-                player.acts = { idle: aI, walk: aW, run: aR, currentAct: aI };
-            }
-            player.mesh = charG;
-            // 挂到场景，并跟随玩家位置 / yaw
-            if (scene) scene.add(charG);
-            console.log('[createPlayerMesh] 玩家 GLB 注入完成', key, 'animations:', src && src.animations && src.animations.length);
-        } catch (e) {
-            console.warn('[createPlayerMesh] 失败，使用胶囊', e);
+        // v6.10.3: 委托给 Player 模块（保留函数名做兼容）
+        if (window.__game && window.__game.player) {
+            window.__game.player.spawn(scene);
         }
     }
     // v6.9: 玩家动画状态机（根据 moveSpeed 切 idle/walk/run）
     function updatePlayerAnim(dt) {
-        if (!player.mixer || !player.acts) return;
-        player.mixer.update(dt);
-        const spd = player.moveSpeed || 0;
-        let target = player.acts.idle;
-        if (spd > 6.0) target = player.acts.run;
-        else if (spd > 0.4) target = player.acts.walk;
-        if (target && player.acts.currentAct !== target) {
-            target.reset();
-            target.setLoop(THREE.LoopRepeat, Infinity);
-            target.fadeIn(0.2);
-            target.play();
-            if (player.acts.currentAct) player.acts.currentAct.fadeOut(0.2);
-            player.acts.currentAct = target;
+        // v6.10.3: 委托给 Player 模块
+        if (window.__game && window.__game.player) {
+            window.__game.player.updateAnim(dt);
         }
     }
 

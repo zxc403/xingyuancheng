@@ -1,5 +1,17 @@
 # Changelog
 
+## v6.10.3 — 抽离 Player 实体（commit 4 of 7）
+- ✅ `src/entities/Player.js` 从占位升级为完整玩家实体类
+- ✅ `spawn(scene)` - clone Xbot + 染色 + AnimationMixer 注入
+- ✅ `_spawnFallback(scene)` - GLB 不可用时使用胶囊兜底
+- ✅ `updateAnim(dt)` - 动画状态机（idle/walk/run + fadeIn/Out 0.2s）
+- ✅ `syncMesh()` - 同步 mesh 到 pos/yaw
+- ✅ `setVisible(v)` - 载具切换时显示/隐藏
+- ✅ index.html 中 `createPlayerMesh()` 和 `updatePlayerAnim()` 改为 5 行委托代码
+- ✅ 减少 index.html 75 行（创建玩家身体 + 动画状态机）
+- ⏸ updatePlayer 大函数（300+ 行物理/碰撞/载具）尚未迁移 - 留到 v6.11 物理模块时一起做
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.2 — 抽离 Input 模块（commit 3 of 7）
 - ✅ `src/core/Input.js` 从占位升级为完整输入事件管理
 - ✅ 提供 `init({rendererEl, callbacks})` 接口（接收回调：onMouseMove / onMouseDown / onPointerLockChange / onEscape / onTouchViewStart / onTouchView / onTouchJoystick / onTouchAction）
