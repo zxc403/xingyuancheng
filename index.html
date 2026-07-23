@@ -295,6 +295,8 @@
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
     // v6.10.1: 抽离 Renderer 模块
     import { Renderer as RendererModule } from './src/core/Renderer.js';
+    // v6.10.6: 渲染后端抽象层
+    import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js';
     // v6.10.2: 抽离 Input 模块
     import { Input as InputModule } from './src/core/Input.js';
     // v6.10.3: 抽离 Player 实体
@@ -308,6 +310,11 @@
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
+    window.__game.backend = new RendererBackend();
+    // v6.10.6: 启动能力探测
+    window.__game.backend.detectCapabilities().then(cap => {
+        console.log('[v6.10.6] 渲染后端能力', cap);
+    });
     window.__game.input = new InputModule();
     window.__game.player = new PlayerModule();
     window.__game.NPC = NPCModule;

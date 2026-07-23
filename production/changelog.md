@@ -1,5 +1,17 @@
 # Changelog
 
+## v6.10.6 — 渲染后端抽象层 + vendor 清理（commit 7 of 7）
+- ✅ 新增 `src/core/RendererBackend.js` - 渲染后端抽象层
+- ✅ `detectCapabilities()` - 探测 WebGL2 / WebGPU 能力 + 扩展
+- ✅ `Backend.WEBGL2 / WEBGPU / UNKNOWN` 三态枚举
+- ✅ `createRenderer(opts)` - 统一接口（v6.10.6 返回 WebGLRenderer，v6.11 切换 WebGPU）
+- ✅ `recommendPixelRatio()` - 移动端 1.5，PC 端 2
+- ✅ index.html 启动时自动探测后端能力
+- ✅ 清理 vendor/three/three.min.js（节省 656KB，从 2.1MB → 1.4MB）
+- ⏸ **实际切换到 r166 留到 v6.11 专用 sprint**（EffectComposer/OutputPass 在 r160→r166 有 break change）
+- ⏸ 实际切换到 WebGPU 留到 v6.11（v6.10.6 仅准备接口）
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.5 — 抽离 Collision + Pathfinder（commit 6 of 7）
 - ✅ `src/physics/Collision.js` 从占位升级为完整碰撞系统
 - ✅ `init(scene)` - 遍历 scene 收集所有碰撞盒（按 userData 过滤地面/玩家/载具）
