@@ -302,6 +302,9 @@
     // v6.10.4: 抽离 NPC + Vehicle 实体
     import { NPC as NPCModule } from './src/entities/NPC.js';
     import { Vehicle as VehicleModule } from './src/entities/Vehicle.js';
+    // v6.10.5: 抽离 Collision + Pathfinder
+    import { Collision as CollisionModule } from './src/physics/Collision.js';
+    import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js';
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
@@ -309,6 +312,8 @@
     window.__game.player = new PlayerModule();
     window.__game.NPC = NPCModule;
     window.__game.Vehicle = VehicleModule;
+    window.__game.collision = new CollisionModule();
+    window.__game.pathfinder = new PathfinderModule();
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     // 用相对路径预检 GLTFLoader 是否存在
@@ -684,6 +689,10 @@
     async function loadRealModels() {
         if (!window._realModels) window._realModels = {};
         if (!window._npcMixers) window._npcMixers = [];  // v6.6: NPC 动画 mixer 列表
+        // v6.10.5: 加挂 Collision 模块（收集场景中所有碰撞体）
+        if (window.__game && window.__game.collision && typeof scene !== 'undefined' && scene) {
+            window.__game.collision.init(scene);
+        }
         const loader = new GLTFLoader();
         const list = [
             // 建筑

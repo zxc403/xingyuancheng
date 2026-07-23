@@ -1,5 +1,19 @@
 # Changelog
 
+## v6.10.5 — 抽离 Collision + Pathfinder（commit 6 of 7）
+- ✅ `src/physics/Collision.js` 从占位升级为完整碰撞系统
+- ✅ `init(scene)` - 遍历 scene 收集所有碰撞盒（按 userData 过滤地面/玩家/载具）
+- ✅ `checkSphere(x, y, z, radius)` - AABB 圆球碰撞检测
+- ✅ `getGroundHeight(x, z)` - 查询地形高度（委托给 window.getTerrainH）
+- ✅ `resolveSlide(pos, vel, radius)` - 滑动碰撞解算（先 X 后 Z）
+- ✅ `src/ai/Pathfinder.js` 从占位升级为寻路接口
+- ✅ `findPath(start, end)` - v6.10.5 返回直线插值（10 段），v6.11 接入 recast-navigation-js
+- ✅ `addWaypoint()` + `findNearestWaypoint()` - 巡逻点系统
+- ✅ loadRealModels 末尾调用 collision.init(scene) 收集碰撞体
+- ⏸ mesh-bvh 精确碰撞留到 v6.11（BVHEcctrl）
+- ⏸ A* 寻路留到 v6.11（recast-navigation-js）
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.4 — 抽离 NPC + Vehicle 实体（commit 5 of 7）
 - ✅ `src/entities/NPC.js` 从占位升级为完整 NPC 类
 - ✅ `NPC.spawn(type, x, z, custom)` 工厂方法 - clone GLB + 按 type.beh 选 Soldier/Xbot/Barbarian + 染色 + AnimationMixer
