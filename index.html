@@ -295,9 +295,12 @@
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
     // v6.10.1: 抽离 Renderer 模块
     import { Renderer as RendererModule } from './src/core/Renderer.js';
+    // v6.10.2: 抽离 Input 模块
+    import { Input as InputModule } from './src/core/Input.js';
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
+    window.__game.input = new InputModule();
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     // 用相对路径预检 GLTFLoader 是否存在
@@ -3149,9 +3152,51 @@
 
     // ===== 输入 =====
     function initInput() {
+        // v6.10.2: 用 Input 模块接管事件绑定（保留老逻辑作为兼容层）
+        if (window.__game && window.__game.input) {
+            const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+            // v6.9.2 兼容: 早期已激活 touchCtrl
+            if (isTouch) {
+                const tc = document.getElementById('touchCtrl');
+                if (tc && !tc.classList.contains('active')) tc.classList.add('active');
+            }
+            window.__game.input.init({
+                rendererEl: renderer ? renderer.domElement : null,
+                callbacks: {
+                    onMouseMove: (dx, dy) => {
+                        if (isPointerLocked && !gamePaused) {
+                            player.yaw -= dx * 0.002;
+                            player.pitch -= dy * 0.002;
+                            player.pitch = U.clamp(player.pitch, -1.4, 1.4);
+                        }
+                    },
+                    onMouseDown: (button) => {
+                        if (!gameStarted || gamePaused) return;
+                        if (button === 0) shoot();
+                    },
+                    onPointerLockChange: (locked) => {
+                        isPointerLocked = locked;
+                    },
+                    onEscape: () => {
+                        if (gameStarted && !player.isDead && !player.isBusted) gamePaused = !gamePaused;
+                    },
+                    onTouchViewStart: () => {
+                        return { yaw: player.yaw, pitch: player.pitch };
+                    },
+                    onTouchView: (dx, dy, baseYaw, basePitch) => {
+                        player.yaw = baseYaw - dx * Math.PI * 1.4;
+                        player.pitch = U.clamp(basePitch - dy * Math.PI * 0.9, -1.4, 1.4);
+                    }
+                }
+            });
+            // 注册业务快捷键（v6.10.2 阶段先沿用老的事件绑定逻辑，保证完全兼容）
+            // v6.10.7 阶段把 keydown handler 全部迁移到 input.bindAction
+            console.log('[v6.10.2] Input 模块接管完成，老逻辑保留作为兼容层');
+        }
+
+        // 保留老的 keydown 业务逻辑（武器切换/任务/帮助等）
         document.addEventListener('keydown', e=>{
             const k=e.key.toLowerCase();
-            keys[k]=true;
             if(!gameStarted||gamePaused) return;
             if(k>='1'&&k<='9'){ const idx=parseInt(k)-1; if(idx<weapons.length) switchWeapon(idx); }
             if(k==='r') reload();
@@ -3159,44 +3204,22 @@
             if(k==='f5') quickSave();
             if(k==='f9') quickLoad();
             if(k==='t') generateMission();
-            // v6.4: H 键循环切换武器（快速轮转）
             if(k==='h'){
                 const next = (curWeapon+1) % weapons.length;
                 switchWeapon(next);
             }
-            // v6.5: P 键循环天气
             if(k==='p'){
                 gameWeather = (gameWeather + 1) % 5;
                 showNotif('天气切换：'+weatherNames[Math.floor(gameWeather)]);
             }
-            // v6.5: N 键快进时间到下一个时段
             if(k==='n'){
                 gameTimeMin = (gameTimeMin + 360) % 1440;
                 showNotif('时间快进到 '+getTimeStr());
             }
-            // v6.5: ? 键帮助面板
             if(e.key==='?'||e.key==='/'||k==='?'){
                 document.getElementById('helpPanel').classList.toggle('show');
             }
         });
-        document.addEventListener('keyup', e=>{ keys[e.key.toLowerCase()]=false; });
-        document.addEventListener('mousemove', e=>{
-            if(!isPointerLocked||gamePaused) return;
-            player.yaw -= e.movementX*0.002;
-            player.pitch -= e.movementY*0.002;
-            player.pitch = U.clamp(player.pitch, -1.4, 1.4);
-        });
-        document.addEventListener('mousedown', e=>{ if(!gameStarted||gamePaused) return; if(e.button===0) shoot(); });
-        document.addEventListener('pointerlockchange', ()=> isPointerLocked = document.pointerLockElement===renderer.domElement);
-        document.addEventListener('keydown', e=>{ if(e.key==='Escape' && gameStarted && !player.isDead && !player.isBusted) gamePaused=!gamePaused; });
-        // v6.9.2: touchCtrl 已在 init 早期被激活, 这里只补 initTouch() 绑定事件
-        // 双重保险: 如果早期没激活 (PC), 在这里也跑一次
-        const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
-        if(isTouch){
-            const tc = document.getElementById('touchCtrl');
-            if (tc && !tc.classList.contains('active')) tc.classList.add('active');
-            initTouch();
-        }
     }
 
     function initTouch() {

@@ -1,5 +1,15 @@
 # Changelog
 
+## v6.10.2 — 抽离 Input 模块（commit 3 of 7）
+- ✅ `src/core/Input.js` 从占位升级为完整输入事件管理
+- ✅ 提供 `init({rendererEl, callbacks})` 接口（接收回调：onMouseMove / onMouseDown / onPointerLockChange / onEscape / onTouchViewStart / onTouchView / onTouchJoystick / onTouchAction）
+- ✅ 提供 `bindAction(key, fn)` 快捷键注册
+- ✅ 提供 `update()` 每帧重置鼠标增量
+- ✅ index.html initInput 调用 Input.init，老的 keydown 业务逻辑（武器切换/任务/帮助）保留作为兼容层
+- ✅ Input 模块的 _initTouch 自动激活 #touchCtrl（v6.9.2 兼容）
+- ⏸ 老的 keydown/mousemove/mousedown 监听器尚未删除 - v6.10.7 才完全切到 Input.bindAction
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.1 — 抽离 Renderer 模块（commit 2 of 7）
 - ✅ `src/core/Renderer.js` 从占位升级为完整状态容器
 - ✅ `attach({scene,camera,renderer,composer,clock,isMobile})` 接收 index.html 已建好的 Three.js 对象
