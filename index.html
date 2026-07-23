@@ -415,7 +415,11 @@
         ];
         for (const it of list) {
             try {
-                const gltf = await loader.loadAsync(it.url);
+                // v6.1.1: 加 8 秒超时，避免单个 GLB 拖死启动
+                const gltf = await Promise.race([
+                    loader.loadAsync(it.url),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+                ]);
                 const obj = gltf.scene || gltf.scenes[0];
                 // 自动遍历启用阴影 + 调整材质到 MeshStandardMaterial
                 obj.traverse(child => {
@@ -3046,7 +3050,8 @@
             if (realHDR) scene.environment = realHDR;
             window._realHDR = realHDR;
             if(lt) lt.textContent = '加载真实 3D 模型...';
-            await loadRealModels().catch(e => {
+            // v6.1.1: 不 await，让 buildWorld 立即开始（GLB 后台加载）
+            loadRealModels().catch(e => {
                 console.warn('[Init] real models failed, use procedural', e);
             });
             if(lt) lt.textContent = '构建城市...';
@@ -3055,6 +3060,12 @@
             const lb = document.getElementById('loadText');
             if(lb) lb.textContent = '初始化失败: ' + e.message;
             console.error(e);
+        } finally {
+            // v6.1.1: 无论成功失败都强制移除 blocker，避免永远卡在启动页
+            try {
+                const blocker = document.getElementById('blocker');
+                if (blocker) blocker.style.display = 'none';
+            } catch(_){}
             return;
         }
         try { initInput(); } catch(e){ console.warn('initInput', e); }
