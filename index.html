@@ -4113,11 +4113,10 @@
             } catch(_){}
             console.error(e);
         } finally {
-            // v6.1.1: 无论成功失败都强制移除 blocker，避免永远卡在启动页
-            try {
-                const blocker = document.getElementById('blocker');
-                if (blocker) blocker.style.display = 'none';
-            } catch(_){}
+            // v6.9.1: 修复 - 不再强制隐藏 blocker！之前 v6.1.1 的兜底逻辑会让 blocker 消失但
+            // gameStarted 仍为 false, 导致 updatePlayer 永远不被调用 (玩家根本动不了)
+            // 现在的策略: init 成功后, 让 blocker 保留可见, 由用户点击进入
+            // 如果 init 内部某步失败, 在 init 抛错前已经显示了对应错误, 不需要兜底隐藏
             // 隐藏进度条
             setTimeout(() => {
                 try {
@@ -4135,6 +4134,14 @@
         }
         try { initInput(); } catch(e){ console.warn('initInput', e); }
         try { AudioSys.init(); } catch(e){ console.warn('AudioSys', e); }
+        // v6.9.1: 修复 - init 成功后自动启动游戏，不再强制要求点击 blocker
+        // (因为 init 完成时 blocker 仍在, 但用户可能错过了点击时机, 导致 gameStarted 永远 false)
+        if (!gameStarted) {
+            gameStarted = true;
+            gamePaused = false;
+            showNotif('欢迎来到长沙！WASD移动，鼠标视角，T接任务');
+            console.log('[v6.9.1] init 完成, 自动 gameStarted=true');
+        }
         updateHUD();
         updateWeaponHUD();
         updateWantedHUD();
@@ -4158,11 +4165,24 @@
             gameStarted = true;
             gamePaused = false;
             showNotif('欢迎来到长沙！WASD移动，鼠标视角，T接任务');
-            renderer.domElement.requestPointerLock();
+            try { renderer.domElement.requestPointerLock(); } catch(_){}
         } else if(player.isDead || player.isBusted){
             respawn();
         }
     });
+
+    // v6.9.1: 修复 - 12秒兜底自动启动, 避免 init 完成但用户没点 blocker 导致玩家永远动不了
+    setTimeout(() => {
+        if (!gameStarted && typeof player !== 'undefined' && player && typeof scene !== 'undefined' && scene) {
+            const blocker = document.getElementById('blocker');
+            if (blocker) blocker.style.display = 'none';
+            gameStarted = true;
+            gamePaused = false;
+            try { renderer.domElement.requestPointerLock(); } catch(_){}
+            showNotif('欢迎来到长沙！WASD移动，鼠标视角，T接任务');
+            console.log('[v6.9.1] 12秒超时, 自动 gameStarted=true');
+        }
+    }, 12000);
 
     // 挂载设置事件（已经绑定）
     // 启动
