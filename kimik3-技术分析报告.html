@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>5个 Kimik3 作品技术分析报告</title>
+<style>
+  :root{
+    --bg:#0a0e16; --panel:#131826; --line:rgba(127,212,232,.16);
+    --ink:#eaf3f8; --dim:rgba(234,243,248,.55); --faint:rgba(234,243,248,.3);
+    --accent:#7fd4e8; --warn:#f3a04c; --bad:#e08a7a; --good:#88d4a8;
+    --mono:'SF Mono','Cascadia Code','Consolas',ui-monospace,monospace;
+    --body:'PingFang SC','Microsoft YaHei',ui-sans-serif,system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.65;-webkit-font-smoothing:antialiased}
+  body{padding:40px 28px 80px;max-width:1180px;margin:0 auto}
+  h1{font-size:30px;font-weight:700;letter-spacing:.04em;margin-bottom:6px}
+  h2{font-size:21px;margin:38px 0 14px;padding-left:14px;border-left:3px solid var(--accent);letter-spacing:.03em}
+  h3{font-size:16px;margin:24px 0 10px;color:var(--accent);letter-spacing:.04em}
+  h4{font-size:14px;margin:16px 0 8px;color:var(--warn);font-family:var(--mono);letter-spacing:.05em}
+  p{color:var(--dim);margin-bottom:10px}
+  .lead{font-size:15px;color:var(--ink);max-width:780px;margin:14px 0 28px}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.1em}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-family:var(--mono);font-size:12px}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--accent);font-weight:600;letter-spacing:.06em;background:rgba(127,212,232,.04)}
+  tr:hover td{background:rgba(127,212,232,.03)}
+  td.c{text-align:center}
+  .yes{color:var(--good)}.no{color:var(--bad)}.partial{color:var(--warn)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:14px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);padding:16px;border-radius:6px}
+  .card .ttl{font-size:13px;color:var(--accent);font-family:var(--mono);letter-spacing:.08em;margin-bottom:6px}
+  .card .num{font-size:30px;font-weight:700;color:var(--ink);font-family:var(--mono);letter-spacing:-.02em}
+  .card .sub{font-size:11px;color:var(--faint);margin-top:4px;letter-spacing:.08em}
+  pre{background:#06080d;border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow-x:auto;
+    font-family:var(--mono);font-size:12px;line-height:1.55;color:#cfe6f5;margin:10px 0}
+  code{font-family:var(--mono);font-size:.92em;color:#7fd4e8;background:rgba(127,212,232,.08);padding:1px 6px;border-radius:3px}
+  pre code{background:transparent;padding:0;color:inherit}
+  .callout{background:rgba(243,160,76,.06);border:1px solid rgba(243,160,76,.3);border-left:3px solid var(--warn);
+    padding:14px 18px;border-radius:0 6px 6px 0;margin:16px 0;font-size:13.5px}
+  .callout.bad{background:rgba(224,138,122,.06);border-color:rgba(224,138,122,.3);border-left-color:var(--bad)}
+  .callout.good{background:rgba(136,212,168,.06);border-color:rgba(136,212,168,.3);border-left-color:var(--good)}
+  .callout b{color:var(--ink)}
+  ul{padding-left:22px;margin-bottom:12px}
+  li{color:var(--dim);margin-bottom:5px;font-size:14px}
+  li b{color:var(--ink);font-weight:600}
+  .hr{height:1px;background:linear-gradient(to right,transparent,var(--line),transparent);margin:36px 0}
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-family:var(--mono);
+    letter-spacing:.05em;background:rgba(127,212,232,.12);color:var(--accent);margin-right:6px;vertical-align:middle}
+  .badge.bad{background:rgba(224,138,122,.15);color:var(--bad)}
+  .badge.warn{background:rgba(243,160,76,.15);color:var(--warn)}
+  .badge.good{background:rgba(136,212,168,.15);color:var(--good)}
+</style>
+</head>
+<body>
+
+<div class="meta">技术翻译报告 · 2026-07-23 · 给 GTA-style 星渊城项目</div>
+<h1>5 个 Kimik3 作品 · 技术演进与黑屏诊断</h1>
+<p class="lead">这次你传上来 5 个 Kimik3 作品 + 1 个你自己的星渊城旧版（73affec0 那个忽略，不是这次的事）。5 个 Kimik3 作品从 19K 一直迭代到 52K，体积越大能力越多，但最终版（52K）却黑屏了。结论先放出来：<b>能跑的是 19K / 24K / 34K 那 3 个，最终 44K / 52K 都属于"功能堆上去但渲染管线复杂度爆炸"的版本</b>，黑屏几乎可以肯定是浮点 FBO 初始化失败导致的。下面是详细分析。</p>
+
+<div class="grid">
+  <div class="card"><div class="ttl">V1 海的尽头·技术演示</div><div class="num">19 KB</div><div class="sub">单文件 · 零依赖 · 6 波 Gerstner</div></div>
+  <div class="card"><div class="ttl">V2 海的尽头·终极完美</div><div class="num">24 KB</div><div class="sub">+ 鼠标涟漪 / 点击水花 / 巡游</div></div>
+  <div class="card"><div class="ttl">V3 潮汐·完美整合</div><div class="num">34 KB</div><div class="sub">+ 雾·星·月·各向异性高光</div></div>
+  <div class="card"><div class="ttl">V4 潮汐·终极电影</div><div class="num">44 KB</div><div class="sub">+ TAA · 飞鸟 · 物理频谱 · 雨雪</div></div>
+  <div class="card"><div class="ttl">V5 潮汐·全模块</div><div class="num">52 KB · 黑屏</div><div class="sub">+ 小船 · SSS · 控制台</div></div>
+</div>
+
+<h2>一 · 5 个版本能力演进对照表</h2>
+<table>
+  <thead>
+    <tr><th>能力维度</th><th class="c">V1 (19K)</th><th class="c">V2 (24K)</th><th class="c">V3 (34K)</th><th class="c">V4 (44K)</th><th class="c">V5 (52K)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>渲染状态</td><td class="c"><span class="yes">能跑</span></td><td class="c"><span class="yes">能跑</span></td><td class="c"><span class="yes">能跑</span></td><td class="c"><span class="partial">待验证</span></td><td class="c"><span class="no">黑屏</span></td></tr>
+    <tr><td>Gerstner 波数</td><td class="c">6</td><td class="c">6</td><td class="c">6</td><td class="c">16</td><td class="c">16</td></tr>
+    <tr><td>渲染目标 (FBO)</td><td class="c">默认 backbuffer</td><td class="c">默认 backbuffer</td><td class="c">默认 backbuffer</td><td class="c">RGBA16F × 3</td><td class="c">RGBA16F × 3</td></tr>
+    <tr><td>pass 数 (program)</td><td class="c">1</td><td class="c">1</td><td class="c">1</td><td class="c">3 (TAA)</td><td class="c">3 (TAA + Bloom)</td></tr>
+    <tr><td>菲涅尔 + 反射天空</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>程序化天空 (云/星/月)</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>时段关键帧 + 插值</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>鼠标涟漪 / 点击水花</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>拖尾 (trail)</td><td class="c">—</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>各向异性太阳高光</td><td class="c">—</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>焦散 / 飞沫 / 飞鸟</td><td class="c">—</td><td class="c">—</td><td class="c">焦散+飞沫</td><td class="c">+ 飞鸟</td><td class="c">+ 飞鸟</td></tr>
+    <tr><td>3D 物理小船 (浮力)</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td></tr>
+    <tr><td>雨 / 雪粒子</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td><td class="c"><span class="yes">✓</span></td></td></tr>
+    <tr><td>自动昼夜 + 控制台</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c">—</td><td class="c"><span class="yes">✓</span></td></td></tr>
+    <tr><td>扩展 / FBO 校验</td><td class="c">无需</td><td class="c">无需</td><td class="c">无需</td><td class="c"><span class="no">缺</span></td><td class="c"><span class="no">缺</span></td></td></tr>
+  </tbody>
+</table>
+
+<div class="hr"></div>
+
+<h2>二 · 黑屏诊断：V5 (52K) 的 5 个根因（按可能性排序）</h2>
+
+<h3>① 致命：RGBA16F 浮点纹理未检测扩展</h3>
+<p>V5 的 <code>createTexture()</code> 直接用 <code>gl.RGBA16F</code> + <code>gl.RGBA, gl.FLOAT</code> 创建纹理，<b>没有</b>调用 <code>gl.getExtension('EXT_color_buffer_float')</code>。在 WebGL2 里，把浮点纹理当作 FBO 渲染目标必须先启用这个扩展，否则驱动静默失败，画面就是黑的（不报错）。</p>
+<pre><code>// V5 第 446 行
+function createTexture(w,h,filter){
+  var t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,<b>gl.RGBA16F</b>,w,h,0,<b>gl.RGBA,gl.FLOAT</b>,null);
+  // ❌ 没有 gl.getExtension('EXT_color_buffer_float')
+  // ❌ 没有 gl.checkFramebufferStatus(gl.FRAMEBUFFER)
+}</code></pre>
+
+<div class="callout bad">
+<b>修复方法：</b>在 <code>getContext('webgl2')</code> 之后立刻 <code>gl.getExtension('EXT_color_buffer_float')</code>，并降级方案：若扩展缺失则用 <code>RGBA8</code> 替代（损失 HDR 但能跑）。
+</div>
+
+<h3>② 致命：FBO 在 w=0 / h=0 时初始化</h3>
+<p>V5 第 631 行执行顺序：</p>
+<pre><code>initGL();           // 第 630 行 → initGLResources()，此时 w=0, h=0
+applySize();        // 第 632 行 → 改 w/h, 触发第二次 initGLResources()</code></pre>
+<p>第二次 <code>applySize()</code> 里只有 <code>if(cv.width!==nw||cv.height!==nh){...;initGLResources()}</code>，如果浏览器在执行 <code>applySize()</code> 前 cv 已经有 clientWidth（多数情况），那么 nw=nh=正确尺寸，<b>会</b>走 initGLResources 分支重建。但若用户在控制台 resize 或者异步逻辑把 cv 尺寸先变成 0，就会留下 0 尺寸的 FBO，黑屏。</p>
+
+<div class="callout bad">
+<b>修复方法：</b>在 <code>initGLResources()</code> 里加 <code>if(w&lt;2||h&lt;2) return;</code> 守卫；或者把 init 顺序倒过来（先 applySize 再 initGL）。
+</div>
+
+<h3>③ 严重：TAA 历史纹理初始化为空</h3>
+<p>V5 第一次 <code>frame()</code> 渲染时，<code>histTex</code> 还没写入任何东西，<code>comp</code> shader 里 <code>texture(uHist, histUv)</code> 采样到的是 <b>未定义值</b>，通常表现为画面整体偏黑（按 blendFactor 0.05 还能透出来一点，但视觉上就是黑屏）。</p>
+
+<div class="callout">
+<b>修复方法：</b>init 时用 <code>gl.clearColor(0,0,0,1); gl.bindFramebuffer(...); gl.clear(...);</code> 把 histTex 清成 0。
+</div>
+
+<h3>④ 中等：RGBA16F 在部分 iOS Safari 上完全不支持</h3>
+<p>如果在 iPhone Safari / 部分 Android Chrome 上跑，FBO 完整性检查返回 <code>FRAMEBUFFER_UNSUPPORTED</code>，同样会黑屏，且代码没接住。</p>
+
+<h3>⑤ 轻微：3 个 program 共享 1 个 VAO，但每帧切换 program 时没 bind VAO</h3>
+<p>V5 创建 1 个 VAO 给 3 个 program 用，但每次 <code>gl.useProgram(progBloom/progComp)</code> 后<b>没有重新 <code>gl.bindVertexArray(_vao)</code></code>，某些驱动会丢掉 attribute 指针。表现是第一个 pass (progMain) 正常出图，但 bloom / comp pass 因为 attribute 没绑而不画，最终 composite 输出是空白。</p>
+
+<div class="callout good">
+<b>建议：</b>在每个 pass 之前统一 <code>gl.bindVertexArray(_vao);</code>，再 <code>gl.useProgram(...);</code>，最后 <code>gl.drawArrays(...);</code>。
+</div>
+
+<div class="hr"></div>
+
+<h2>三 · V4 (44K) 的隐患：和 V5 类似但更轻</h2>
+<p>V4 也用了 3 program + RGBA16F + TAA，但它的 <code>initGLResources</code> 写法略不同（V4 走 3 个 program，没用统一的 init 函数重构），黑屏概率比 V5 低。<b>但它和 V5 共享同样的"无扩展检测 / 无 FBO 完整性校验"问题</b>。所以你 AI 在修 V5 的时候，把 V4 的修法搬过去基本可解决。</p>
+
+<div class="hr"></div>
+
+<h2>四 · 真正能"学到"的技术（在能跑的 3 个版本里）</h2>
+<p>对星渊城项目最有借鉴价值的是 <b>V3 (34K 完美整合版)</b>——它功能丰富、跑得稳、零外部依赖、单文件 34K 完全可控。V1/V2 是骨架，V3 是肉。</p>
+
+<h3>① Gerstner 波 + 浪群包络（最值钱的）</h3>
+<p>6 个余弦波叠加 + 一个"波群包络"产生"一组浪 → 平静 → 再来一组"的节奏感。</p>
+<pre><code>// V3 FSH 第 149-184 行
+const vec2 DK[6]=... // 6 个波的方向·波数
+const vec2 WA[6]=... // 6 个波的角频率·振幅
+float waveGroup(vec2 xz, float t){
+  return 0.72 + 0.28*sin(dot(xz,vec2(0.018,0.012))-t*0.25)
+                * sin(dot(xz,vec2(-0.009,0.021))+t*0.18);
+}
+float seaGeo(vec2 xz, float t){
+  float g=waveGroup(xz,t);
+  float h=0.0;
+  for(int i=0;i&lt;6;i++) h+=WA[i].y*g*cos(dot(DK[i],xz)+t*WA[i].x);
+  return h;
+}</code></pre>
+
+<h3>② LOD：远海降低细节</h3>
+<p>V3/V4 的关键优化：远处海面 fbm 细节乘 0.25，靠近保持 1.0。<b>在你的 GTA 游戏里直接能用</b>。</p>
+<pre><code>// V3 FSH 第 187 行
+float lod = smoothstep(14.0, 70.0, length(xz-uCam.xz));
+f += fbm(q*2.7+vec2(t*0.5,-t*0.35))*0.5*<b>mix(1.0, 0.25, lod)</b>;</code></pre>
+
+<h3>③ 鼠标 / 点击 / 拖尾涟漪（高度 + 着色）</h3>
+<p>涟漪是 <b>在 seaHeight 里叠加</b>，不是后处理，所以你 GTA 里有水面 + 玩家走过产生涟漪的场景直接套用。</p>
+<pre><code>// V3 第 154-177 行
+float rippleH(vec2 xz, float t){
+  float h=0.0;
+  if(uMouseActive>0.5){                 // 鼠标悬停
+    float md=length(xz-uMousePos.xz);
+    h+=0.08*sin(md*9.0-t*7.0)*exp(-md*1.1);
+  }
+  if(uClick.w>0.001){                   // 单击水花
+    float age=t-uClick.z;
+    float cd=length(xz-uClick.xy);
+    h+=decay*0.22*sin(cd*7.0-age*11.0)*exp(-abs(cd-age*2.6)*0.8);
+  }
+  for(int i=0;i&lt;6;i++){                 // 拖尾
+    if(i>=uTrailN) break;
+    float ta=t-uTrail[i].z;
+    h+=uTrail[i].w*0.06*sin(td*8.0-ta*9.0)*exp(-td*1.4)*exp(-ta*2.0);
+  }
+  return h;
+}</code></pre>
+
+<h3>④ 各向异性太阳高光（夕阳水面拉长金光）</h3>
+<p>这是 V3 才加的、效果最惊艳的部分。<b>关键参数是 <code>stretch</code></b>：太阳低时高光沿水平拉长成"金路"。</p>
+<pre><code>// V3 FSH 第 294-302 行
+vec3 H=normalize(uSunDir-rd);
+float sunLow=1.0-smoothstep(0.05, 0.35, uSunDir.y);  // 太阳高度
+float stretch=mix(1.0, 0.25, sunLow*(1.0-rough));     // 低太阳拉长
+vec3 Hs=normalize(vec3(H.x*stretch, H.y, H.z));
+float spec=pow(max(dot(n,Hs),0.0), specExp)*mix(3.0, 0.8, rough);
+col += uSunCol*spec*(0.5+0.5*(1.0-fres));</code></pre>
+
+<h3>⑤ 焦散 + 飞沫</h3>
+<p>水面下的焦散是 fbm 自乘立方 + 距离衰减的简单方案：</p>
+<pre><code>// V3 FSH 第 308-318 行
+float ca=fbm(p.xz*4.0+vec2(t*0.6,-t*0.4));
+ca=pow(ca, 3.0)*2.2*(0.4+0.6*crest);
+col += uSunCol*ca*0.10*smoothstep(60.0, 8.0, dist);
+
+float spray=smoothstep(0.75, 1.15, p.y+steep*0.5)
+           * smoothstep(0.55, 0.9, fbm(p.xz*6.0+t*vec2(1.2,0.9)));
+col=mix(col, vec3(0.9,0.95,1.0), clamp(spray,0.0,1.0)*0.5*smoothstep(80.0,20.0,dist));</code></pre>
+
+<h3>⑥ 时段关键帧 + 指数趋近插值（切时段光带扫过）</h3>
+<p>V1~V5 全部沿用：</p>
+<pre><code>// V3 FSH 第 415-429 行
+var ENVS=[ {name:'黎明', sun:[0.58,0.10,-0.78], sunCol:[1.00,0.60,0.42], ...},
+           {name:'正午', ...}, ... ];
+function stepEnv(dt){
+  var k=1-Math.exp(-dt*1.7);   // 指数趋近，无突变
+  // 插值 9 个标量：sun / sunCol / top / hor / deep / shal / night / cloud / fog / expo
+}</code></pre>
+
+<h3>⑦ 海天无缝（雾色取视线方向的天空色）</h3>
+<p>这是远景不出现"海天分割硬边"的诀窍：</p>
+<pre><code>// V3 FSH 第 333-338 行
+float fogF=1.0-exp(-dist*uFog);
+vec3 fogCol=sky(normalize(vec3(rd.x, 0.02, rd.z)), cTmp2);
+col=mix(col, fogCol, clamp(fogF, 0.0, 1.0));</code></pre>
+
+<div class="hr"></div>
+
+<h2>五 · 性能数字（V3 跑出的参考值）</h2>
+<p>V3 公开的自适应分辨率梯子（LADDER）+ 帧率调整：</p>
+<pre><code>var LADDER=[2.0, 1.6, 1.3, 1.05, 0.85, 0.68, 0.55]; // 内部渲染倍率
+// 当 FPS&lt;45 自动降一档；FPS&gt;108 持续 4 秒升一档
+// 目标：60Hz 普通机 1.05x / 120Hz 高刷机 2.0x</code></pre>
+<p>在你的 GTA 项目里直接搬这个梯子函数 + DPR clamp = 2.0 限制，再加 FPS 监控，60fps 移动端稳得很。</p>
+
+<div class="hr"></div>
+
+<h2>六 · 给你 AI 的"修黑屏"提示词（直接转发）</h2>
+<div class="callout">
+<b>如果你的 AI 是 Kimi / GPT 之类的，给它这段：</b><br><br>
+<q style="color:var(--ink)">你的 52K 全模块整合版黑屏，根因是 FBO + 浮点纹理初始化失败。三个必修：<br>
+1) <code>getContext</code> 之后立刻 <code>gl.getExtension('EXT_color_buffer_float')</code>，失败则降级到 <code>RGBA8</code>。<br>
+2) <code>createFramebuffer</code> 后用 <code>gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE</code> 校验，不通过直接 <code>fatal()</code> 并打印 status。<br>
+3) <code>histTex</code> / <code>mainTex</code> 创建后立刻 <code>gl.bindFramebuffer(...); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);</code> 清零，避免 TAA 第一帧采样到未定义值。<br>
+4) 每个 program 切换前 <code>gl.bindVertexArray(_vao)</code>。<br>
+5) <code>initGL()</code> 和 <code>applySize()</code> 顺序保证 <code>w&gt;0 && h&gt;0</code> 时再创建 FBO。</q>
+</div>
+
+<div class="hr"></div>
+
+<h2>七 · 翻译到星渊城 v6.6 的优先级</h2>
+<table>
+  <thead>
+    <tr><th>优先级</th><th>技术</th><th>来源</th><th>工作量</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="c"><span class="badge good">P0</span></td><td>时段关键帧（黎明/正午/黄昏/月夜）</td><td>V1</td><td class="c">半天</td></tr>
+    <tr><td class="c"><span class="badge good">P0</span></td><td>海天无缝雾（雾色=视线方向天空）</td><td>V1</td><td class="c">半天</td></tr>
+    <tr><td class="c"><span class="badge good">P0</span></td><td>各向异性太阳高光（金路）</td><td>V3</td><td class="c">1 天</td></tr>
+    <tr><td class="c"><span class="badge warn">P1</span></td><td>焦散（fbm³ + 距离衰减）</td><td>V3</td><td class="c">半天</td></tr>
+    <tr><td class="c"><span class="badge warn">P1</span></td><td>浪群包络 Gerstner（6 波 + 包络）</td><td>V3</td><td class="c">1 天</td></tr>
+    <tr><td class="c"><span class="badge warn">P1</span></td><td>鼠标 / 点击 / 拖尾涟漪</td><td>V2</td><td class="c">半天</td></tr>
+    <tr><td class="c"><span class="badge bad">P2</span></td><td>飞鸟（屏幕空间简化版）</td><td>V4</td><td class="c">1 天</td></tr>
+    <tr><td class="c"><span class="badge bad">P2</span></td><td>雨/雪粒子</td><td>V4</td><td class="c">半天</td></tr>
+    <tr><td class="c"><span class="badge bad">P2</span></td><td>3D 物理小船（浮力·倾斜）</td><td>V5</td><td class="c">1-2 天</td></tr>
+    <tr><td class="c"><span class="badge bad">P2</span></td><td>TAA + Bloom 后处理</td><td>V4/V5</td><td class="c">2 天</td></tr>
+    <tr><td class="c"><span class="badge bad">P2</span></td><td>控制台（浪高/泡沫/SSS 滑块）</td><td>V5</td><td class="c">半天</td></tr>
+  </tbody>
+</table>
+
+<p style="margin-top:24px">P0 三件事加起来不到 2 天，效果会非常显著——海面从"平的蓝色面"直接升到"夕阳水面拉金路 + 远处和天空融成一片"。<b>建议 v6.6 先吃 P0 + P1，5 个 P2 留 v6.7 慢慢加</b>。等你 AI 把黑屏修好，再开始搬 V3 那一套进游戏。</p>
+
+<div class="hr">
+</div>
+<p class="meta" style="text-align:center;margin-top:30px">报告完 · 你把这份给 Kimik3 AI 看也行，修黑屏会快很多</p>
+
+</body>
+</html>

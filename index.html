@@ -102,6 +102,10 @@
         #settings { position:fixed; top:16px; right:160px; z-index:110; display:flex; gap:6px; }
         #settings .gear { background:rgba(10,14,20,.6); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.05); border-radius:10px; padding:6px 12px; color:#7a8a9a; font-size:11px; cursor:pointer; transition:background .2s; }
         #settings .gear:hover { background:rgba(30,40,50,.5); color:#b0c0d0; }
+        #settings .time-btn { background:rgba(10,14,20,.6); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.05); border-radius:10px; padding:6px 12px; color:#b0c0d0; font-size:11px; cursor:pointer; transition:background .2s, color .2s; user-select:none; }
+        #settings .time-btn:hover { background:rgba(30,40,50,.5); color:#ffffff; }
+        #settings .time-btn.night { color:#7eb6ff; border-color:rgba(120,180,255,.3); }
+        #settings .time-btn.dusk  { color:#ff9a4a; border-color:rgba(255,154,74,.3); }
         #settings-pop { position:fixed; top:60px; right:20px; background:rgba(10,14,20,.95); backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,.04); border-radius:14px; padding:18px 22px; z-index:300; width:300px; display:none; box-shadow:0 20px 60px rgba(0,0,0,.5); }
         #settings-pop.open { display:block; }
         #settings-pop label { color:#b0c0d0; font-size:11px; display:block; margin-bottom:5px; }
@@ -173,7 +177,7 @@
         <div class="mission-bar" id="missionBar"><div class="mission-title" id="missionTitle"></div><div class="mission-obj" id="missionObj"></div></div>
         <div class="dmg-overlay" id="dmgOverlay"></div>
     </div>
-    <div id="settings"><div class="gear" id="settingsToggle">⚙️ AI</div></div>
+    <div id="settings"><div class="gear" id="settingsToggle">⚙️ AI</div><div class="time-btn" id="timeBtn" title="切换昼夜">☀️ 日</div></div>
     <div id="settings-pop"><label>DeepSeek API Key（可选·增强NPC对话）</label><input type="password" id="apiKeyInput" placeholder="sk-..."><div class="row"><button id="apiSave">💾 保存</button><button id="apiClear">🗑️ 清除</button></div><div class="status" id="apiStatus">⚪ 未设置</div></div>
     <div id="chat-panel"><button id="chatClose">✕</button><div id="chat-msgs"></div><div id="chat-input-row"><input id="chatInput" placeholder="输入你想问的..." autocomplete="off"><button id="chatSend">发送</button></div></div>
     <div class="touch-ctrl" id="touchCtrl"><div class="joy-l" id="joyL"><div class="joy-knob" id="joyKnob"></div></div><div class="touch-view" id="touchView"></div><div class="touch-btns"><button class="t-btn fire" id="btnFire">🔥</button><button class="t-btn sm act" id="btnJump">⬆</button><button class="t-btn sm act" id="btnReload">↻</button><button class="t-btn sm" id="btnInteract">✋</button><button class="t-btn sm" id="btnVehicle">🚗</button></div></div>
@@ -497,6 +501,65 @@
 
     // ---- 真实 HDR 加载器（v6.1 升级：4K 多云 + 1K 备用） ----
     // v6.2: 首屏先用 1K (day_quarry, 6.7MB) 快速出图，5 秒后后台再升级 4K
+    // v6.7: 加入夜城 HDRI + 时间切换（夜/日/黄昏）
+    const HDR_LIST = {
+        day_1k:  'assets/hdri/day_quarry.hdr',                 // 6.7MB 快速首屏
+        day_4k:  'assets/hdri/kloppenheim_06_4k.hdr',          // 17.4MB 升级 4K
+        night_a: 'assets/hdri/qwantani_night_2k.hdr',          // 6.5MB 非洲星空夜
+        night_b: 'assets/hdri/moonless_golf_2k.hdr',           // 6.4MB 无月乡村夜
+        night_c: 'assets/hdri/neon_photostudio_2k.hdr',        // 6.1MB 霓虹摄影棚（赛博朋克）
+        dusk:    'assets/hdri/the_sky_is_on_fire_2k.hdr'       // 5.8MB 火烧云黄昏
+    };
+    let currentHDRKey = 'day_1k';
+    function _applyHDRTex(tex) {
+        if (!tex || !scene) return;
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        const envRT = pmrem.fromEquirectangular(tex);
+        pmrem.dispose();
+        tex.dispose();
+        scene.environment = envRT.texture;
+    }
+    async function setTimeOfDay(mode) {
+        const map = { day:'day_4k', night:'night_c', dusk:'dusk' };
+        const key = map[mode] || 'day_4k';
+        if (key === currentHDRKey && scene && scene.environment) return;
+        currentHDRKey = key;
+        const url = HDR_LIST[key];
+        try {
+            const loader = new THREE.RGBELoader();
+            const tex = await loader.loadAsync(url);
+            _applyHDRTex(tex);
+            if (mode === 'night') {
+                scene.background = null;
+                scene.fog = new THREE.FogExp2(0x05060c, 0.018);
+                if (window._sun) { window._sun.intensity = 0.15; window._sun.color.setHex(0x6080a0); }
+                if (window._ambient) { window._ambient.intensity = 0.25; window._ambient.color.setHex(0x2a2f4a); }
+                if (window._hemisphere) { window._hemisphere.intensity = 0.35; }
+                if (renderer) renderer.toneMappingExposure = 0.9;
+                console.log('[HDR] 切换 → 夜城霓虹', url);
+            } else if (mode === 'dusk') {
+                scene.background = null;
+                scene.fog = new THREE.FogExp2(0x2a0e08, 0.012);
+                if (window._sun) { window._sun.intensity = 0.6; window._sun.color.setHex(0xff7733); }
+                if (window._ambient) { window._ambient.intensity = 0.45; window._ambient.color.setHex(0x553322); }
+                if (window._hemisphere) { window._hemisphere.intensity = 0.6; }
+                if (renderer) renderer.toneMappingExposure = 1.1;
+                console.log('[HDR] 切换 → 黄昏火烧云', url);
+            } else {
+                scene.background = null;
+                scene.fog = new THREE.FogExp2(0x9bb3cc, 0.008);
+                if (window._sun) { window._sun.intensity = 1.0; window._sun.color.setHex(0xffffff); }
+                if (window._ambient) { window._ambient.intensity = 0.55; window._ambient.color.setHex(0xffffff); }
+                if (window._hemisphere) { window._hemisphere.intensity = 0.7; }
+                if (renderer) renderer.toneMappingExposure = 1.0;
+                console.log('[HDR] 切换 → 白日多云', url);
+            }
+            if (window.updateTimeHUD) window.updateTimeHUD(mode);
+        } catch (e) {
+            console.warn('[HDR] 加载失败', url, e);
+        }
+    }
     async function loadRealHDR() {
         const loader = new THREE.RGBELoader();
         // 首屏：1K (6.7MB)，约 1.5s 出图
@@ -547,6 +610,7 @@
     // 加载建筑/车辆/角色真模型，缓存到 window._realModels
     async function loadRealModels() {
         if (!window._realModels) window._realModels = {};
+        if (!window._npcMixers) window._npcMixers = [];  // v6.6: NPC 动画 mixer 列表
         const loader = new GLTFLoader();
         const list = [
             // 建筑
@@ -566,6 +630,9 @@
             { key: 'char_mage',      url: 'assets/models/characters/Mage.glb' },
             { key: 'char_rogue',     url: 'assets/models/characters/Rogue.glb' },
             { key: 'char_rogue_h',   url: 'assets/models/characters/Rogue_Hooded.glb' },
+            // v6.6 写实角色：Xbot（女）/ Soldier（警察）
+            { key: 'char_xbot',      url: 'assets/models/characters/Xbot.glb' },
+            { key: 'char_soldier',   url: 'assets/models/characters/Soldier.glb' },
             // v6.2 新增：道具（用于替换 pickup/glow/摊位）
             { key: 'prop_chest',       url: 'assets/models/props/chest.glb' },
             { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb' },
@@ -599,6 +666,11 @@
                     }
                 });
                 window._realModels[it.key] = obj;
+                if (!window._realModelsSrc) window._realModelsSrc = {};
+                // v6.6: 保存原始 gltf（含 animations）供 AnimationMixer 使用
+                if (gltf.animations && gltf.animations.length) {
+                    window._realModelsSrc[it.key] = { scene: obj, animations: gltf.animations };
+                }
                 console.log('[RealModel] loaded', it.key);
             } catch (e) {
                 console.warn('[RealModel] failed', it.key, e);
@@ -1745,16 +1817,18 @@
     function createNPC(type,x,z,custom) {
         const g = new THREE.Group();
         // v6.2: 优先用真实 GLB 角色（已加载）
-        const NPC_GLB = ['char_barbarian','char_knight','char_mage','char_rogue','char_rogue_h'];
+        const NPC_GLB = ['char_barbarian','char_knight','char_mage','char_rogue','char_rogue_h','char_xbot','char_soldier'];
+        // v6.6: 警察/工人 → 写实；其他 → 奇幻
         const BEH_GLB = {
-            police: 'char_knight',     // 警察 → 骑士
-            gang:   'char_barbarian',  // 帮派 → 蛮族
-            worker: 'char_mage',       // 上班族 → 法师
-            student:'char_rogue',      // 学生 → 盗贼
-            vendor: 'char_rogue_h'     // 小贩 → 蒙面盗贼
+            police: Math.random()<0.7 ? 'char_soldier' : 'char_knight',   // 70% 写实士兵
+            gang:   'char_barbarian',
+            worker: Math.random()<0.5 ? 'char_xbot' : 'char_mage',          // 50% 写实女性
+            student:'char_rogue',
+            vendor: 'char_rogue_h'
         };
         const glbKey = BEH_GLB[type.beh] || NPC_GLB[Math.floor(Math.random()*NPC_GLB.length)];
         let useGLB = false;
+        let animUserData = null;  // v6.6: 动画系统引用
         if (window._realModels && window._realModels[glbKey]) {
             try {
                 const charG = window._realModels[glbKey].clone(true);
@@ -1767,8 +1841,55 @@
                 const center = new THREE.Vector3(); box.getCenter(center);
                 charG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
                 charG.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+
+                // v6.6: 按 glbKey + 材质名精确染色（保留贴图原细节）
+                // Soldier: VanguardBodyMat 染色（衣服），Vanguard_VisorMat 保留（护目镜）
+                // Xbot:    Beta_HighLimbsGeoSG2 染色（衣服），Beta_Joints_MAT 保留（皮肤）
+                const target = new THREE.Color(type.color);
+                charG.traverse(c => {
+                    if (!c.isMesh || !c.material) return;
+                    const matName = (c.material.name) || '';
+                    let isCloth = false;
+                    if (glbKey === 'char_soldier') {
+                        isCloth = /VanguardBodyMat/i.test(matName);
+                    } else if (glbKey === 'char_xbot') {
+                        isCloth = /Beta_HighLimbsGeoSG2|Beta_HighLimbs/i.test(matName);
+                    } else {
+                        // 奇幻角色：所有材质都染色（它们本来就是卡通单色）
+                        isCloth = true;
+                    }
+                    if (isCloth) {
+                        c.material = c.material.clone();
+                        const cc = c.material.color;
+                        if (cc && cc.r !== undefined) {
+                            cc.r = target.r; cc.g = target.g; cc.b = target.b;
+                        } else {
+                            c.material.color = target.clone();
+                        }
+                    }
+                });
+
                 g.add(charG);
                 useGLB = true;
+
+                // v6.6: AnimationMixer 初始化
+                const src = window._realModelsSrc && window._realModelsSrc[glbKey];
+                if (src && src.animations && src.animations.length) {
+                    try {
+                        const mixer = new THREE.AnimationMixer(charG);
+                        const findAnim = (kw) => src.animations.find(a => a.name && a.name.toLowerCase().includes(kw));
+                        const idle = findAnim('idle') || findAnim('breath') || src.animations[0];
+                        const walk = findAnim('walk') || findAnim('walking') || idle;
+                        const run  = findAnim('run')  || findAnim('jog')   || walk;
+                        const actI = mixer.clipAction(idle); actI.setLoop(THREE.LoopRepeat, Infinity);
+                        const actW = mixer.clipAction(walk); actW.setLoop(THREE.LoopRepeat, Infinity);
+                        const actR = mixer.clipAction(run);  actR.setLoop(THREE.LoopRepeat, Infinity);
+                        actI.play();
+                        animUserData = { mixer, actIdle:actI, actWalk:actW, actRun:actR, currentAct:actI, hasAnim:true };
+                        charG.userData = animUserData;
+                        if (window._npcMixers) window._npcMixers.push(mixer);
+                    } catch (e) { /* ignore anim error */ }
+                }
             } catch (e) {
                 console.warn('[createNPC] GLB 替换失败', e);
             }
@@ -2337,6 +2458,24 @@
             if(n.health<=0) return;
             const dist=U.dist2D(n.mesh.position.x,n.mesh.position.z,pp.x,pp.z);
             if(dist>200) return;
+            // v6.6: 根据状态切换动画
+            try {
+                const firstChild = n.mesh.children && n.mesh.children[0];
+                const ud = firstChild && firstChild.userData;
+                if (ud && ud.hasAnim) {
+                    let target = ud.actIdle;
+                    if (n.state==='chase' || n.state==='flee') target = ud.actRun;
+                    else if (n.state==='walk' || n.state==='fight') target = ud.actWalk;
+                    if (target && ud.currentAct !== target) {
+                        target.reset();
+                        target.setLoop(THREE.LoopRepeat, Infinity);
+                        target.fadeIn(0.2);
+                        target.play();
+                        if (ud.currentAct) ud.currentAct.fadeOut(0.2);
+                        ud.currentAct = target;
+                    }
+                }
+            } catch(e){}
             if(n.stateCooldown>0) n.stateCooldown-=dt;
             if(dist>80 && Math.random()>0.2) return;
             n.stateTimer-=dt;
@@ -2977,6 +3116,28 @@
     function saveAPIKey(k) { apiKey=k; try { localStorage.setItem('deepseek_api_key', k); } catch(e){} updateAPIStatus(); }
     function updateAPIStatus() { const el=document.getElementById('apiStatus'); if(apiKey && apiKey.startsWith('sk-')){ el.textContent='✅ DeepSeek 已连接'; el.className='status ok'; } else { el.textContent='⚪ 未设置 (降级模式)'; el.className='status'; } }
     document.getElementById('settingsToggle').addEventListener('click', ()=>document.getElementById('settings-pop').classList.toggle('open'));
+
+    // ---- v6.7: 昼夜切换按钮（赛博朋克夜城 / 白天 / 黄昏） ----
+    (function(){
+        const btn = document.getElementById('timeBtn');
+        const order = ['day','dusk','night'];
+        const label = { day:'☀️ 日', dusk:'🌇 黄昏', night:'🌃 夜' };
+        let idx = 0;
+        function setBtn(mode){
+            btn.textContent = label[mode];
+            btn.classList.remove('night','dusk');
+            if (mode==='night') btn.classList.add('night');
+            else if (mode==='dusk') btn.classList.add('dusk');
+        }
+        window.updateTimeHUD = function(mode){ setBtn(mode); };
+        btn.addEventListener('click', ()=>{
+            idx = (idx + 1) % order.length;
+            const mode = order[idx];
+            setBtn(mode);
+            if (typeof setTimeOfDay === 'function') setTimeOfDay(mode);
+        });
+        setBtn(order[idx]);
+    })();
     document.getElementById('apiSave').addEventListener('click', ()=>{ const k=document.getElementById('apiKeyInput').value.trim(); if(k){ saveAPIKey(k); document.getElementById('settings-pop').classList.remove('open'); } });
     document.getElementById('apiClear').addEventListener('click', ()=>{ saveAPIKey(''); document.getElementById('apiKeyInput').value=''; document.getElementById('settings-pop').classList.remove('open'); });
     loadAPIKey();
@@ -3210,8 +3371,10 @@
         // 三点光 + 半球光（暖色温，金色阳光）— 5 灯系统
         ambient = new THREE.AmbientLight(0x8a7a6a, 0.45);
         scene.add(ambient);
+        window._ambient = ambient;
         hemi = new THREE.HemisphereLight(0x9ec5e8, 0x3a2a1a, 0.6);
         scene.add(hemi);
+        window._hemisphere = hemi;
         // Key：暖金太阳
         sun = new THREE.DirectionalLight(0xfff0d0, 3.0);
         if(window._skyDome){
@@ -3228,6 +3391,7 @@
         sun.shadow.normalBias = 0.04;
         sun.shadow.radius = 4;
         scene.add(sun);
+        window._sun = sun;
         // Fill：冷蓝紫补光（背光面不死黑）
         const fill = new THREE.DirectionalLight(0x6688c0, 0.55);
         fill.position.set(80, 60, 80);
@@ -3451,6 +3615,12 @@
     function animate() {
         requestAnimationFrame(animate);
         const dt = Math.min(clock.getDelta(), 0.05);
+        // v6.6: 更新所有 NPC 动画 mixer
+        if (window._npcMixers) {
+            for (let i = 0; i < window._npcMixers.length; i++) {
+                try { window._npcMixers[i].update(dt); } catch(e){}
+            }
+        }
         AudioSys.updateStepCooldown(dt);  // v6.4: 脚步冷却
         if(gameStarted && !gamePaused) {
             updatePlayer(dt);
