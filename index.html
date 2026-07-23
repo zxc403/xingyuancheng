@@ -6,7 +6,27 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v6.5 · 天气+时间+帮助面板版 (2026-07-23 22:00)</title>
+    <title>星渊城 v6.7.1 · 移动端降级版 (2026-07-24)</title>
+    <script>
+    // v6.7.1: 移动端自动降级 + 全局 Promise 兜底（消除 Chromium 红条）
+    (function(){
+        try {
+            window._isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 1.5) : Math.min(window.devicePixelRatio||1, 2);
+            // 拦截未处理的 Promise 拒绝 → 不再触发 Chromium 红条
+            window.addEventListener('unhandledrejection', function(e){
+                console.warn('[v6.7.1] unhandled promise:', e.reason && (e.reason.message||e.reason));
+                e.preventDefault && e.preventDefault();
+            });
+            window.addEventListener('error', function(e){
+                if (e && e.message && /script error/i.test(e.message)) {
+                    console.warn('[v6.7.1] swallowed script error');
+                    return true;
+                }
+            });
+        } catch(_) {}
+    })();
+    </script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
         body { overflow:hidden; background:#0a0e14; font-family:'PingFang SC','Microsoft YaHei',sans-serif; color:#fff; touch-action:none; position:fixed; width:100%; height:100%; top:0; left:0; }
@@ -458,11 +478,19 @@
 
     // ---- 真实 PBR 纹理加载器（v6.1 扩展：从 /assets/textures/ 加载） ----
     // v6.1: 扩展到 8 套 (4 套 2K 原 + 4 套 4K 新)
+    // v6.7.1: 移动端只加载 4 套核心；每张 8s 超时；失败走 canvas 程序化纹理兜底
     async function loadRealTextures() {
-        const sets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron'];
+        const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron'];
+        // 移动端只保留 4 套最常用，减少并发数 + 节省流量
+        const sets = (window._isMobile) ? ['asphalt', 'plank', 'rocky', 'concrete'] : allSets;
         const chs = ['diff', 'nor', 'rough'];  // v6.1: AO 缺失会 fall through
         const out = {};
         // v6.2: 并发加载（消除 23 次额外 RTT，首屏 -30%）
+        // v6.7.1: 加 8s 超时 + 全失败兜底
+        const _withTimeout = (p, ms) => Promise.race([
+            p,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+        ]);
         const tasks = [];
         for (const setName of sets) {
             const tex = { map: null, normalMap: null, roughnessMap: null, aoMap: null };
@@ -471,7 +499,7 @@
                 tasks.push((async () => {
                     try {
                         const url = `assets/textures/${setName}_${ch}.jpg`;
-                        const t = await new THREE.TextureLoader().loadAsync(url);
+                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 8000);
                         if (ch === 'diff') {
                             t.colorSpace = THREE.SRGBColorSpace;
                             tex.map = t;
@@ -486,17 +514,41 @@
                         t.anisotropy = 8;
                         t.repeat.set(2, 2);
                     } catch (e) {
-                        console.warn(`[RealTexture] failed ${setName}/${ch}`, e);
+                        // v6.7.1: 静默失败，不向上抛 → 杜绝 Chromium 红条
+                        console.warn(`[RealTexture] fallback ${setName}/${ch}`, e && e.message);
                     }
                 })());
             }
         }
         await Promise.allSettled(tasks);
+        // v6.7.1: 给缺失通道补 canvas 程序化贴图
         for (const setName of sets) {
             const tex = out[setName];
-            console.log(`[RealTexture] loaded ${setName}: d=${!!tex.map} n=${!!tex.normalMap} r=${!!tex.roughnessMap} a=${!!tex.aoMap}`);
+            if (!tex.map) tex.map = _mkFallbackTex('#888888', setName);
+            if (!tex.normalMap) tex.normalMap = _mkFallbackTex('#8080ff', setName);
+            if (!tex.roughnessMap) tex.roughnessMap = _mkFallbackTex('#cccccc', setName);
+            console.log(`[RealTexture] loaded ${setName}: d=${tex.map!==null} n=${tex.normalMap!==null} r=${tex.roughnessMap!==null}`);
         }
         return out;
+    }
+    // v6.7.1: 程序化兜底贴图（CanvasTexture）
+    function _mkFallbackTex(color, seed) {
+        try {
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.fillRect(0, 0, 64, 64);
+            // 加点噪点避免完全平面
+            for (let i = 0; i < 200; i++) {
+                ctx.fillStyle = `rgba(${Math.random()<0.5?255:0},${Math.random()<0.5?255:0},${Math.random()<0.5?255:0},0.08)`;
+                ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2);
+            }
+            const t = new THREE.CanvasTexture(c);
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(2, 2);
+            return t;
+        } catch(e) { return null; }
     }
 
     // ---- 真实 HDR 加载器（v6.1 升级：4K 多云 + 1K 备用） ----
@@ -3206,7 +3258,7 @@
         });
         renderer.setClearColor(0x0a0e14, 1.0);
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setPixelRatio(window._pixelRatio || Math.min(window.devicePixelRatio, 2));
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.shadowMap.autoUpdate = true;
