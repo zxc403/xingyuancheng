@@ -3032,30 +3032,57 @@
             window.addEventListener('unhandledrejection', e => showErr('[Promise] ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
         } catch(_){}
 
+        // v6.1.2: 进度条 UI
         try {
-            const lt = document.getElementById('loadText');
+            const pb = document.createElement('div');
+            pb.id = 'progressBar';
+            pb.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;max-width:400px;background:rgba(0,0,0,.7);border:1px solid #ffd700;border-radius:8px;padding:12px;z-index:99998;color:#ffd700;font:14px sans-serif;text-align:center;display:none;';
+            pb.innerHTML = '<div id="pbText">加载中...</div><div style="height:6px;background:#333;margin-top:8px;border-radius:3px;overflow:hidden;"><div id="pbFill" style="height:100%;background:linear-gradient(90deg,#ffd700,#ff8800);width:0%;transition:width .3s;"></div></div>';
+            document.body.appendChild(pb);
+        } catch(_){}
+        const lt = document.getElementById('loadText');
+        const showProgress = (txt, pct) => {
+            try {
+                const pb = document.getElementById('progressBar');
+                const pf = document.getElementById('pbFill');
+                const pt = document.getElementById('pbText');
+                if (pb) pb.style.display = 'block';
+                if (pf) pf.style.width = (pct||0) + '%';
+                if (pt) pt.textContent = txt;
+            } catch(_){}
+        };
+
+        try {
             if(lt) lt.textContent = '初始化引擎...';
+            showProgress('初始化引擎...', 5);
             await initEngine();
             if(lt) lt.textContent = '加载真实 PBR 纹理...';
+            showProgress('加载 PBR 纹理 (8 套 4K)...', 15);
             const realTex = await loadRealTextures().catch(e => {
                 console.warn('[Init] real textures failed, use procedural', e);
                 return null;
             });
             window._realTex = realTex;
             if(lt) lt.textContent = '加载 HDR 环境光...';
+            showProgress('加载 HDR 环境...', 35);
             const realHDR = await loadRealHDR().catch(e => {
                 console.warn('[Init] real HDR failed, use procedural sky', e);
                 return null;
             });
             if (realHDR) scene.environment = realHDR;
             window._realHDR = realHDR;
-            if(lt) lt.textContent = '加载真实 3D 模型...';
-            // v6.1.1: 不 await，让 buildWorld 立即开始（GLB 后台加载）
-            loadRealModels().catch(e => {
-                console.warn('[Init] real models failed, use procedural', e);
-            });
             if(lt) lt.textContent = '构建城市...';
+            showProgress('构建城市...', 50);
             buildWorld();
+            if(lt) lt.textContent = '启动游戏...';
+            showProgress('启动游戏...', 90);
+            // v6.1.2: 不再 await GLB（避免卡死）
+            // 启动 5 秒后后台慢慢加载 GLB，避免阻塞首屏
+            setTimeout(() => {
+                loadRealModels().catch(e => {
+                    console.warn('[BG] real models failed (non-fatal)', e);
+                });
+            }, 5000);
         } catch(e){
             const lb = document.getElementById('loadText');
             if(lb) lb.textContent = '初始化失败: ' + e.message;
@@ -3066,6 +3093,13 @@
                 const blocker = document.getElementById('blocker');
                 if (blocker) blocker.style.display = 'none';
             } catch(_){}
+            // 隐藏进度条
+            setTimeout(() => {
+                try {
+                    const pb = document.getElementById('progressBar');
+                    if (pb) pb.style.display = 'none';
+                } catch(_){}
+            }, 2000);
             return;
         }
         try { initInput(); } catch(e){ console.warn('initInput', e); }
