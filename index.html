@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v6.1.5 · 深度修复卡死版 (2026-07-23 18:00)</title>
+    <title>星渊城 v6.2 · 摇杆修复+GLB接入版 (2026-07-23 19:30)</title>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
         body { overflow:hidden; background:#0a0e14; font-family:'PingFang SC','Microsoft YaHei',sans-serif; color:#fff; touch-action:none; position:fixed; width:100%; height:100%; top:0; left:0; }
@@ -289,6 +289,47 @@
     ];
     let curWeapon=0, lastFireTime=0, isReloading=false;
 
+    // v6.2: 第一人称武器 viewmodel（程序几何，挂在 camera 下方右侧）
+    const playerWeaponMesh = new THREE.Group();
+    playerWeaponMesh.visible = true;
+    function buildWeaponMesh(slot) {
+        while (playerWeaponMesh.children.length) playerWeaponMesh.remove(playerWeaponMesh.children[0]);
+        let m;
+        const matBody = new THREE.MeshStandardMaterial({color:0x222222, metalness:0.85, roughness:0.25});
+        const matAccent = new THREE.MeshStandardMaterial({color:0x444444, metalness:0.7, roughness:0.4});
+        if (slot === 'melee') {
+            // 拳头：肉色球
+            m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshStandardMaterial({color:0xe8c8a0, roughness:0.6}));
+            m.position.set(0, 0, 0);
+            playerWeaponMesh.add(m);
+        } else if (slot === 'handgun' || slot === 'shotgun' || slot === 'smg' || slot === 'rifle' || slot === 'sniper' || slot === 'heavy') {
+            // 通用枪身
+            const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), matBody);
+            barrel.position.set(0, 0, -0.25);
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.3), matBody);
+            body.position.set(0, 0, 0);
+            const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.08), matAccent);
+            grip.position.set(0, -0.1, 0.1);
+            const mag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.05), matAccent);
+            mag.position.set(0, -0.15, -0.05);
+            playerWeaponMesh.add(barrel, body, grip, mag);
+            if (slot === 'sniper' || slot === 'heavy') {
+                // 加长 barrel + scope
+                const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.15, 8), matAccent);
+                scope.rotation.x = Math.PI/2;
+                scope.position.set(0, 0.08, 0);
+                playerWeaponMesh.add(scope);
+            }
+        } else if (slot === 'thrown') {
+            // 手雷：球+小柄
+            m = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshStandardMaterial({color:0x445533, roughness:0.6}));
+            m.position.set(0, 0, 0);
+            playerWeaponMesh.add(m);
+        }
+        playerWeaponMesh.children.forEach(c => { if (c.isMesh) { c.castShadow = false; } });
+    }
+    buildWeaponMesh(weapons[0].slot);
+
     // ---- 载具 ----
     const vehicleTypes = {
         sedan:{name:'轿车',speed:45,accel:20,brake:30,turn:2.8,health:100,mass:1,color:0x4488cc},
@@ -381,63 +422,86 @@
         const sets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron'];
         const chs = ['diff', 'nor', 'rough'];  // v6.1: AO 缺失会 fall through
         const out = {};
-
+        // v6.2: 并发加载（消除 23 次额外 RTT，首屏 -30%）
+        const tasks = [];
         for (const setName of sets) {
             const tex = { map: null, normalMap: null, roughnessMap: null, aoMap: null };
-            for (const ch of chs) {
-                try {
-                    const url = `assets/textures/${setName}_${ch}.jpg`;
-                    const t = await new THREE.TextureLoader().loadAsync(url);
-                    if (ch === 'diff') {
-                        t.colorSpace = THREE.SRGBColorSpace;
-                        tex.map = t;
-                    } else if (ch === 'nor') {
-                        tex.normalMap = t;
-                    } else if (ch === 'rough') {
-                        tex.roughnessMap = t;
-                    } else if (ch === 'ao') {
-                        tex.aoMap = t;
-                    }
-                    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                    t.anisotropy = 8;
-                    t.repeat.set(2, 2);
-                } catch (e) {
-                    console.warn(`[RealTexture] failed ${setName}/${ch}`, e);
-                }
-            }
             out[setName] = tex;
+            for (const ch of chs) {
+                tasks.push((async () => {
+                    try {
+                        const url = `assets/textures/${setName}_${ch}.jpg`;
+                        const t = await new THREE.TextureLoader().loadAsync(url);
+                        if (ch === 'diff') {
+                            t.colorSpace = THREE.SRGBColorSpace;
+                            tex.map = t;
+                        } else if (ch === 'nor') {
+                            tex.normalMap = t;
+                        } else if (ch === 'rough') {
+                            tex.roughnessMap = t;
+                        } else if (ch === 'ao') {
+                            tex.aoMap = t;
+                        }
+                        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+                        t.anisotropy = 8;
+                        t.repeat.set(2, 2);
+                    } catch (e) {
+                        console.warn(`[RealTexture] failed ${setName}/${ch}`, e);
+                    }
+                })());
+            }
+        }
+        await Promise.allSettled(tasks);
+        for (const setName of sets) {
+            const tex = out[setName];
             console.log(`[RealTexture] loaded ${setName}: d=${!!tex.map} n=${!!tex.normalMap} r=${!!tex.roughnessMap} a=${!!tex.aoMap}`);
         }
         return out;
     }
 
     // ---- 真实 HDR 加载器（v6.1 升级：4K 多云 + 1K 备用） ----
+    // v6.2: 首屏先用 1K (day_quarry, 6.7MB) 快速出图，5 秒后后台再升级 4K
     async function loadRealHDR() {
-        return new Promise((resolve, reject) => {
-            const loader = new THREE.RGBELoader();
-            // v6.1: 优先加载 4K kloppenheim_06 (GTA5 风格黄昏)
-            loader.load('assets/hdri/kloppenheim_06_4k.hdr', (hdrTex) => {
+        const loader = new THREE.RGBELoader();
+        // 首屏：1K (6.7MB)，约 1.5s 出图
+        return new Promise((resolve) => {
+            loader.load('assets/hdri/day_quarry.hdr', (hdrTex) => {
                 hdrTex.mapping = THREE.EquirectangularReflectionMapping;
                 const pmrem = new THREE.PMREMGenerator(renderer);
                 const envRT = pmrem.fromEquirectangular(hdrTex);
                 pmrem.dispose();
                 hdrTex.dispose();
-                console.log('[RealHDR] loaded 4K kloppenheim_06 (GTA5 黄昏多云)');
+                console.log('[RealHDR] 首屏 1K day_quarry 已加载（6.7MB）');
                 resolve(envRT.texture);
+                // 后台：5 秒后异步升级 4K，不阻塞首屏
+                setTimeout(async () => {
+                    try {
+                        const loader4k = new THREE.RGBELoader();
+                        const tex4k = await loader4k.loadAsync('assets/hdri/kloppenheim_06_4k.hdr');
+                        tex4k.mapping = THREE.EquirectangularReflectionMapping;
+                        const pmrem2 = new THREE.PMREMGenerator(renderer);
+                        const env4k = pmrem2.fromEquirectangular(tex4k);
+                        pmrem2.dispose();
+                        tex4k.dispose();
+                        if (scene) scene.environment = env4k.texture;
+                        console.log('[RealHDR] 4K kloppenheim_06 已升级（17.4MB）');
+                    } catch(e) {
+                        console.warn('[RealHDR] 4K 升级失败（继续用 1K）', e);
+                    }
+                }, 5000);
             }, undefined, (err) => {
-                // Fallback: 1K day_quarry
-                console.warn('[RealHDR] 4K failed, trying 1K', err);
-                loader.load('assets/hdri/day_quarry.hdr', (hdrTex) => {
+                console.warn('[RealHDR] 1K 失败，尝试 4K', err);
+                loader.load('assets/hdri/kloppenheim_06_4k.hdr', (hdrTex) => {
                     hdrTex.mapping = THREE.EquirectangularReflectionMapping;
                     const pmrem = new THREE.PMREMGenerator(renderer);
                     const envRT = pmrem.fromEquirectangular(hdrTex);
                     pmrem.dispose();
                     hdrTex.dispose();
-                    console.log('[RealHDR] fallback to 1K day_quarry');
+                    console.log('[RealHDR] fallback to 4K');
                     resolve(envRT.texture);
                 }, undefined, (err2) => {
                     console.warn('[RealHDR] failed both', err2);
-                    reject(err2);
+                    resolve(null);  // 不 reject, 让程序化天空兜底
                 });
             });
         });
@@ -452,11 +516,11 @@
             // 建筑
             { key: 'building_city', url: 'assets/models/buildings/city_building.glb' },
             { key: 'building_block', url: 'assets/models/buildings/city_block.glb' },
-            // 车辆
-            { key: 'car_truck',     url: 'assets/models/vehicles/truck.glb' },
-            { key: 'car_dragster',  url: 'assets/models/vehicles/dragster.glb' },
-            { key: 'car_minivan',   url: 'assets/models/vehicles/minivan.glb' },
-            { key: 'car_bigset',    url: 'assets/models/vehicles/big_set.glb' },
+            // 车辆（v6.2 修：磁盘上是 car1_truck.glb / car2_dragster.glb / car3_minivan.glb / cars_big_set.glb）
+            { key: 'car_truck',     url: 'assets/models/vehicles/car1_truck.glb' },
+            { key: 'car_dragster',  url: 'assets/models/vehicles/car2_dragster.glb' },
+            { key: 'car_minivan',   url: 'assets/models/vehicles/car3_minivan.glb' },
+            { key: 'car_bigset',    url: 'assets/models/vehicles/cars_big_set.glb' },
             { key: 'car_mustang',   url: 'assets/models/vehicles/mustang.glb' },
             // 场景
             { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb' },
@@ -466,10 +530,16 @@
             { key: 'char_mage',      url: 'assets/models/characters/Mage.glb' },
             { key: 'char_rogue',     url: 'assets/models/characters/Rogue.glb' },
             { key: 'char_rogue_h',   url: 'assets/models/characters/Rogue_Hooded.glb' },
+            // v6.2 新增：道具（用于替换 pickup/glow/摊位）
+            { key: 'prop_chest',       url: 'assets/models/props/chest.glb' },
+            { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb' },
+            { key: 'prop_torch',       url: 'assets/models/props/torch_mounted.gltf.glb' },
+            { key: 'prop_barrier',     url: 'assets/models/props/barrier_column.gltf.glb' },
+            { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb' },
         ];
-        for (const it of list) {
+        // v6.2 改：并发加载（之前是串行，5 个角色 GLB 每个 3.5M 串行要 8+ 秒）
+        const tasks = list.map(it => (async () => {
             try {
-                // v6.1.1: 加 8 秒超时，避免单个 GLB 拖死启动
                 const gltf = await Promise.race([
                     loader.loadAsync(it.url),
                     new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
@@ -480,7 +550,6 @@
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
-                        // 升级材质到 PBR Standard (如果原材质不是)
                         if (child.material && !child.material.isMeshStandardMaterial) {
                             const oldMat = child.material;
                             const newMat = new THREE.MeshStandardMaterial({
@@ -498,7 +567,8 @@
             } catch (e) {
                 console.warn('[RealModel] failed', it.key, e);
             }
-        }
+        })());
+        await Promise.allSettled(tasks);
         return window._realModels;
     }
 
@@ -1414,10 +1484,42 @@
             iridescenceIOR: 1.3,
             envMapIntensity: 1.5
         });
+        // v6.2: GLB 真实车壳（如已加载）优先
+        const VEHICLE_GLB = {
+            sedan:   'car_mustang',     // 福特野马
+            sports:  'car_dragster',    // 直线竞速车
+            suv:     'car_minivan',     // 厢式车
+            taxi:    'car_truck',       // 卡车当出租
+            police:  'car_mustang'      // 警车也用野马
+        };
+        let useGLB = false;
+        const glbKey = VEHICLE_GLB[type] || 'car_mustang';
+        if (window._realModels && window._realModels[glbKey]) {
+            try {
+                const carG = window._realModels[glbKey].clone(true);
+                // 自动计算包围盒缩放到车体大小
+                const box = new THREE.Box3().setFromObject(carG);
+                const size = new THREE.Vector3(); box.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+                // mustang.glb 约 4m 长, 缩放 0.9-1.0 适配
+                const targetSize = 4.0;
+                const s = targetSize / maxDim;
+                carG.scale.set(s, s, s);
+                // 居中
+                const center = new THREE.Vector3(); box.getCenter(center);
+                carG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
+                // 启用阴影
+                carG.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+                g.add(carG);
+                useGLB = true;
+            } catch (e) {
+                console.warn('[createVehicle] GLB 替换失败, 使用程序车身', e);
+            }
+        }
         const body = new THREE.Mesh(new THREE.BoxGeometry(bw,bh,bl), bodyMat);
         body.position.y = bh/2+0.4;
         body.castShadow = true;
-        g.add(body);
+        if (!useGLB) g.add(body);  // v6.2: 有 GLB 时不显示程序 body
         const cabinMat = new THREE.MeshPhysicalMaterial({
             color: vt.color,
             metalness: 0.5,
@@ -1557,43 +1659,74 @@
 
     function createNPC(type,x,z,custom) {
         const g = new THREE.Group();
-        // 身体：16 段圆柱 + 圆滑 + IBL
-        const bodyMat = new THREE.MeshStandardMaterial({
-            color: type.color,
-            roughness: 0.55,
-            metalness: 0.05,
-            envMapIntensity: 1.4
-        });
-        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.05, 16, 1), bodyMat);
-        body.position.y = 0.55;
-        body.castShadow = true;
-        body.receiveShadow = true;
-        g.add(body);
-        // 头部：16 段球，更圆
-        const headMat = new THREE.MeshStandardMaterial({
-            color: 0xe8c8a0,
-            roughness: 0.5,
-            metalness: 0.0,
-            envMapIntensity: 1.2
-        });
-        const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), headMat);
-        head.position.y = 1.32;
-        head.castShadow = true;
-        g.add(head);
-        // 帽子/发带：警察有帽子，帮派有红色头巾
+        // v6.2: 优先用真实 GLB 角色（已加载）
+        const NPC_GLB = ['char_barbarian','char_knight','char_mage','char_rogue','char_rogue_h'];
+        const BEH_GLB = {
+            police: 'char_knight',     // 警察 → 骑士
+            gang:   'char_barbarian',  // 帮派 → 蛮族
+            worker: 'char_mage',       // 上班族 → 法师
+            student:'char_rogue',      // 学生 → 盗贼
+            vendor: 'char_rogue_h'     // 小贩 → 蒙面盗贼
+        };
+        const glbKey = BEH_GLB[type.beh] || NPC_GLB[Math.floor(Math.random()*NPC_GLB.length)];
+        let useGLB = false;
+        if (window._realModels && window._realModels[glbKey]) {
+            try {
+                const charG = window._realModels[glbKey].clone(true);
+                const box = new THREE.Box3().setFromObject(charG);
+                const size = new THREE.Vector3(); box.getSize(size);
+                // RPG 角色 GLB 约 1.8-2m 高，缩放 0.9
+                const targetH = 1.7;
+                const s = targetH / size.y;
+                charG.scale.set(s, s, s);
+                const center = new THREE.Vector3(); box.getCenter(center);
+                charG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
+                charG.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+                g.add(charG);
+                useGLB = true;
+            } catch (e) {
+                console.warn('[createNPC] GLB 替换失败', e);
+            }
+        }
+        // 身体：16 段圆柱 + 圆滑 + IBL（v6.2: 有 GLB 时不显示，避免穿模）
+        if (!useGLB) {
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: type.color,
+                roughness: 0.55,
+                metalness: 0.05,
+                envMapIntensity: 1.4
+            });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 1.05, 16, 1), bodyMat);
+            body.position.y = 0.55;
+            body.castShadow = true;
+            body.receiveShadow = true;
+            g.add(body);
+            // 头部：16 段球，更圆
+            const headMat = new THREE.MeshStandardMaterial({
+                color: 0xe8c8a0,
+                roughness: 0.5,
+                metalness: 0.0,
+                envMapIntensity: 1.2
+            });
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), headMat);
+            head.position.y = 1.32;
+            head.castShadow = true;
+            g.add(head);
+        }
+        // 帽子/发带：警察有帽子，帮派有红色头巾（GLB 没有这些装饰，保留）
         if(type.beh === 'police'){
             const cap = new THREE.Mesh(
                 new THREE.CylinderGeometry(0.24, 0.24, 0.08, 16),
                 new THREE.MeshStandardMaterial({color: 0x1133aa, roughness: 0.4, metalness: 0.1, envMapIntensity: 1.2})
             );
-            cap.position.y = 1.46;
+            cap.position.y = useGLB ? 1.95 : 1.46;  // GLB 头顶更高
             g.add(cap);
         } else if(type.beh === 'gang'){
             const band = new THREE.Mesh(
                 new THREE.TorusGeometry(0.22, 0.04, 8, 16),
                 new THREE.MeshStandardMaterial({color: 0xaa2222, roughness: 0.5, envMapIntensity: 1.2})
             );
-            band.position.y = 1.38;
+            band.position.y = useGLB ? 1.85 : 1.38;
             band.rotation.x = Math.PI/2;
             g.add(band);
         }
@@ -1631,15 +1764,43 @@
             {type:'money',x:-100,z:-120},{type:'armor',x:200,z:180}
         ];
         const colors = {health:0xff3333, armor:0x3388ff, money:0x22cc22};
-        const geo = new THREE.SphereGeometry(0.4,8,8);
+        // v6.2: 优先用真实 GLB 道具（chest.glb / coin_stack_medium.gltf.glb）
+        const PICKUP_GLB = { health: 'prop_chest', armor: 'prop_chest', money: 'prop_coin' };
         pts.forEach(p=>{
-            const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-                color:colors[p.type],
-                emissive:colors[p.type],
-                emissiveIntensity:0.5,
-                transparent:true,
-                opacity:0.8
-            }));
+            let m;
+            const glbKey = PICKUP_GLB[p.type];
+            if (window._realModels && window._realModels[glbKey]) {
+                try {
+                    m = window._realModels[glbKey].clone(true);
+                    const box = new THREE.Box3().setFromObject(m);
+                    const size = new THREE.Vector3(); box.getSize(size);
+                    const targetSize = 0.5;  // 小道具缩到 0.5m
+                    const s = targetSize / Math.max(size.x, size.y, size.z);
+                    m.scale.set(s, s, s);
+                    const center = new THREE.Vector3(); box.getCenter(center);
+                    m.position.set(-center.x * s, -box.min.y * s, -center.z * s);
+                    // 加发光
+                    m.traverse(c => {
+                        if (c.isMesh && c.material) {
+                            c.material = c.material.clone();
+                            c.material.emissive = new THREE.Color(colors[p.type]);
+                            c.material.emissiveIntensity = 0.4;
+                            c.castShadow = true;
+                        }
+                    });
+                } catch(e) { m = null; }
+            }
+            if (!m) {
+                // fallback: 球
+                const geo = new THREE.SphereGeometry(0.4,8,8);
+                m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+                    color:colors[p.type],
+                    emissive:colors[p.type],
+                    emissiveIntensity:0.5,
+                    transparent:true,
+                    opacity:0.8
+                }));
+            }
             m.position.set(p.x, 0.8, p.z);
             scene.add(m);
             pickups.push({mesh:m, type:p.type, color:colors[p.type], bobOffset:Math.random()*Math.PI*2});
@@ -1969,6 +2130,8 @@
         curWeapon=idx;
         isReloading=false;
         updateWeaponHUD();
+        // v6.2: 同步更新武器 viewmodel
+        if (typeof buildWeaponMesh === 'function') buildWeaponMesh(weapons[curWeapon].slot);
     }
 
     function throwGrenade() {
@@ -2525,11 +2688,7 @@
                     player.yaw   = vBaseYaw   - dx*Math.PI*1.4;
                     player.pitch = U.clamp(vBasePitch - dy*Math.PI*0.9, -1.4, 1.4);
                 }
-                if(t.identifier===jId && jActive){
-                    const dx=(t.clientX-jStartX)/50, dy=(t.clientY-jStartY)/50;
-                    keys['w']=dy<-0.3; keys['s']=dy>0.3; keys['a']=dx<-0.3; keys['d']=dx>0.3;
-                    knob.style.transform=`translate(${U.clamp(dx*28,-28,28)}px,${U.clamp(dy*28,-28,28)}px) translate(-50%,-50%)`;
-                }
+                // 摇杆的 touchmove 改在 jl 上自己处理（v6.2 修复：外层 pointer-events:none 收不到）
             }
         }, {passive:true});
 
@@ -2552,6 +2711,40 @@
             const t=e.changedTouches[0];
             jId=t.identifier;
             jStartX=t.clientX; jStartY=t.clientY; jActive=true;
+        }, {passive:false});
+
+        // v6.2 摇杆修复：必须把 touchmove 直接绑在 jl 上（外层 ctrl 是 pointer-events:none，事件不会冒泡过去）
+        const joyMove=(e)=>{
+            e.preventDefault();
+            for(const t of e.changedTouches){
+                if(t.identifier===jId && jActive){
+                    const dx=(t.clientX-jStartX)/50, dy=(t.clientY-jStartY)/50;
+                    // 阈值从 0.3 降到 0.15，更灵敏
+                    keys['w']=dy<-0.15; keys['s']=dy>0.15; keys['a']=dx<-0.15; keys['d']=dx>0.15;
+                    // 旋钮视觉：放大反馈范围 (±40)，并加缩放
+                    const px=U.clamp(dx*40,-40,40), py=U.clamp(dy*40,-40,40);
+                    knob.style.transform=`translate(${px}px,${py}px) translate(-50%,-50%) scale(${1+Math.min(0.2,Math.sqrt(dx*dx+dy*dy)*0.1)})`;
+                }
+            }
+        };
+        const joyEnd=(e)=>{
+            for(const t of e.changedTouches){
+                if(t.identifier===jId){
+                    jId=null; jActive=false;
+                    keys['w']=keys['s']=keys['a']=keys['d']=false;
+                    knob.style.transform='translate(-50%,-50%) scale(1)';
+                }
+            }
+        };
+        jl.addEventListener('touchmove', joyMove, {passive:false});
+        jl.addEventListener('touchend', joyEnd, {passive:false});
+        jl.addEventListener('touchcancel', joyEnd, {passive:false});
+
+        // v6.2 兜底：ctrl 上也保留一份（PC 鼠标模拟触屏或一些外接设备可能绕过 jl）
+        ctrl.addEventListener('touchmove', e=>{
+            for(const t of e.changedTouches){
+                if(t.identifier===jId && jActive) joyMove({preventDefault:()=>{},changedTouches:[t]});
+            }
         }, {passive:false});
 
         // 按钮事件
@@ -3004,6 +3197,10 @@
             placeG('char_mage',       150, -100, Math.PI/2, 1.0);
             placeG('char_rogue',     -150, -100, -Math.PI/2, 1.0);
             placeG('char_rogue_h',   100, 150, Math.PI/4, 1.0);
+            // v6.2: 摆 1.8M 的 cyberpunk_city 场景（之前只加载不摆，白白浪费）
+            // scale 0.4 适配 ~200x200m 范围；放偏远角落避免穿插
+            placeG('scene_cyberpunk',  280, -180, Math.PI/4, 0.4);
+            placeG('scene_cyberpunk', -300,  300, -Math.PI/4, 0.3);
         }
     }
 
@@ -3015,6 +3212,29 @@
         const ty = tgt.y + 2 + Math.sin(player.pitch)*5;
         camera.position.lerp(new THREE.Vector3(tx, ty, tz), 0.15);
         camera.lookAt(tgt.x, tgt.y + player.height*0.6, tgt.z);
+
+        // v6.2: 武器 viewmodel 浮在玩家胸前（第三人称）
+        if (!scene) return;  // v6.2: WebGL 失败时 scene 未创建，直接跳过
+        if (!playerWeaponMesh.parent) scene.add(playerWeaponMesh);
+        if (typeof player === 'undefined' || !player || !player.pos) return;
+        if (!player.inVehicle) {
+            playerWeaponMesh.visible = true;
+            // 玩家胸前右下方
+            const wpnOffset = new THREE.Vector3(
+                Math.cos(player.yaw) * 0.5 - Math.sin(player.yaw) * 0.3,
+                1.0,
+                -Math.sin(player.yaw) * 0.5 - Math.cos(player.yaw) * 0.3
+            );
+            playerWeaponMesh.position.copy(player.pos).add(wpnOffset);
+            playerWeaponMesh.position.y = player.pos.y + 1.0;
+            playerWeaponMesh.rotation.y = player.yaw + Math.PI;
+            // 走路/跑步时上下浮动 + 后坐力
+            const t = performance.now() * 0.005;
+            const bob = (Math.abs(player.vel.x) + Math.abs(player.vel.z)) > 0.1 ? Math.sin(t) * 0.04 : 0;
+            playerWeaponMesh.position.y += bob;
+        } else {
+            playerWeaponMesh.visible = false;
+        }
     }
 
     // ===== 主循环 =====
@@ -3181,6 +3401,11 @@
         }
         // v6.1.4: 关键修复！移除 finally 里错误的 return
         // 让以下 initInput / AudioSys / HUD 全部正常执行
+        // v6.2: WebGL 失败时 player/scene 未创建，包一层 try/catch
+        if (!scene || typeof player === 'undefined' || !player) {
+            console.warn('[Init] WebGL 未启动，跳过 HUD 初始化（已显示 webglFail）');
+            return;  // 整个 init 早退
+        }
         try { initInput(); } catch(e){ console.warn('initInput', e); }
         try { AudioSys.init(); } catch(e){ console.warn('AudioSys', e); }
         updateHUD();
