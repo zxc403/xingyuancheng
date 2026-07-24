@@ -3931,7 +3931,7 @@
             // v6.12 (M3.2): Film Pass = 轻量 FXAA + Vignette + Grain（替换 SMAA，多合一）
             // SMAA 在弱 GPU 上慢，FXAA 几乎免费 + 颗粒 + 暗角增益电影感
             try {
-                filmPass = new ShaderPass(FilmShader);
+                let filmPass = new ShaderPass(FilmShader);
                 filmPass.uniforms.uResolution.value = new THREE.Vector2(
                     window.innerWidth * renderer.getPixelRatio(),
                     window.innerHeight * renderer.getPixelRatio()
@@ -4352,8 +4352,9 @@
         updateCamera();
 
         // v6.12 (M3.2): 推进 Film Shader 的 uTime（让 grain 动起来）
-        if (filmPass && filmPass.uniforms && filmPass.uniforms.uTime) {
-            filmPass.uniforms.uTime.value = (clock ? clock.elapsedTime : performance.now() / 1000);
+        // 注意：移动端不启用后处理，window._film 可能为 undefined
+        if (window._film && window._film.uniforms && window._film.uniforms.uTime) {
+            window._film.uniforms.uTime.value = (clock ? clock.elapsedTime : performance.now() / 1000);
         }
 
         if(composer) composer.render();
