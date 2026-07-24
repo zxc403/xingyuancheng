@@ -58,6 +58,7 @@ export class Player {
         this.mixer = null;
         this.acts = null;  // { idle, walk, run, currentAct }
         this.sm = null;    // v6.11.0: AnimationStateMachine
+        this.face = null;  // v6.11.0: FacialExpression（facecap 模型专用）
 
         // 染色
         this.tint = 0x4488ff;  // 玩家衣服颜色（默认蓝）
@@ -152,11 +153,34 @@ export class Player {
 
             this.mesh = charG;
             if (scene) scene.add(charG);
+            // v6.11.0: 初始化 FacialExpression（facecap 模型 / 其他带 morph 的模型可用）
+            this._initFace(charG);
             console.log('[Player.spawn] 玩家 GLB 注入完成', key,
                 'animations:', src && src.animations && src.animations.length);
         } catch (e) {
             console.warn('[Player.spawn] 失败，使用胶囊', e);
             this._spawnFallback(scene);
+        }
+    }
+
+    /**
+     * v6.11.0: 初始化 FacialExpression
+     * 找带 morphTargetInfluences 的 mesh（通常是头部）
+     */
+    _initFace(charG) {
+        if (!window.FacialExpression) return;
+        let headMesh = null;
+        charG.traverse(c => {
+            if (c.isMesh && c.morphTargetInfluences && c.morphTargetInfluences.length > 0) {
+                if (!headMesh || c.morphTargetInfluences.length > headMesh.morphTargetInfluences.length) {
+                    headMesh = c;
+                }
+            }
+        });
+        if (headMesh) {
+            this.face = new window.FacialExpression(headMesh);
+            console.log('[Player._initFace] 找到面部 mesh，morph 数量=',
+                headMesh.morphTargetInfluences.length);
         }
     }
 
@@ -205,6 +229,8 @@ export class Player {
             // v6.6 兜底：直接 mixer.update
             this.mixer.update(dt);
         }
+        // v6.11.0: 面部 morph 渐变推进
+        if (this.face) this.face.update(dt);
     }
 
     /**

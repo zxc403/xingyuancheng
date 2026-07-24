@@ -322,6 +322,11 @@
     import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js';
     window.AnimationStateMachine = AnimationStateMachine;
     window.AnimState = AnimState;
+    // v6.11.0: 面部表情 morph 系统
+    import { FacialExpression, EXPRESSION_PRESETS, SUB_EXPRESSIONS } from './src/entities/FacialExpression.js';
+    window.FacialExpression = FacialExpression;
+    window.EXPRESSION_PRESETS = EXPRESSION_PRESETS;
+    window.SUB_EXPRESSIONS = SUB_EXPRESSIONS;
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
@@ -3202,6 +3207,20 @@
                 if (window.__game.player.playAction('gesture')) {
                     showNotif('👍 Gesture');
                 }
+            }
+            // v6.11.0: 表情调试快捷键（仅当玩家有 face 时生效）
+            if (window.__game && window.__game.player && window.__game.player.face) {
+                const face = window.__game.player.face;
+                if (k === '1') { face.setExpression('neutral');  showNotif('😐 Neutral'); }
+                if (k === '2') { face.setExpression('happy');    showNotif('😊 Happy'); }
+                if (k === '3') { face.setExpression('angry');    showNotif('😠 Angry'); }
+                if (k === '4') { face.setExpression('sad');      showNotif('😢 Sad'); }
+                if (k === '5') { face.setExpression('surprise'); showNotif('😲 Surprise'); }
+                if (k === '6') { face.setExpression('fear');     showNotif('😨 Fear'); }
+                if (k === '7') { face.setExpression('disgust');  showNotif('🤢 Disgust'); }
+                if (k === '8') { face.setExpression('talk');     showNotif('💬 Talk'); }
+                if (k === '0') { face.triggerSub('blink', 1.0, 0.12); showNotif('👁️ Blink'); }
+                if (k === '9') { face.triggerSub('smile', 0.8, 0.20); showNotif('🙂 Smile'); }
             }
         });
     }

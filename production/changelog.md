@@ -1,5 +1,27 @@
 # Changelog
 
+## v6.11.0 — 角色系统 3：面部表情 morph（commit 3 of 6）
+- ✅ **M2.4**: `src/entities/FacialExpression.js` 面部 morph 系统
+  - 8 套主表情预设：neutral / happy / angry / sad / surprise / fear / disgust / talk
+  - 10 套子表情：blink_L/R/双眼, smile, frown, mouthOpen, lookLeft/Right/Up/Down
+  - 每个主表情 = 多个 morph 加权和（如 happy = mouthSmile + eyeSquint + cheekSquint + browInnerUp）
+  - 模糊匹配：'mouthSmile_L' 自动匹配 'blendShape1.mouthSmile_L'
+  - 3 个 API：`setExpression(name)` 立刻设 / `blendExpression(name, dur)` 渐变到 / `triggerSub(name, val, dur)` 一次性
+  - 渐变队列：多个动画并行推进，每帧 lerp 写入 morphTargetInfluences
+- ✅ **Player.js 集成**
+  - `_initFace(charG)` 自动找 charG 里 morphTargetInfluences 最多的 mesh 作为头部
+  - 玩家用 facecap 模型时自动挂载；用 Xbot/Soldier 时跳过
+  - `updateAnim` 每帧推进 face.update
+- ✅ **NPC.js 集成**
+  - 同 Player 自动挂载逻辑
+  - `updateAll` 每帧调 face.update + 8m 内 0.5% 概率随机眨眼（自然感）
+- ✅ **index.html 集成**
+  - 暴露 window.FacialExpression / EXPRESSION_PRESETS / SUB_EXPRESSIONS
+  - 加快捷键 1-8 切主表情 / 0 眨眼 / 9 微笑
+- ⏸ **M2.5 Avatar 自定义** - 待做
+- ⏸ **M2.6 角色 IK** - 待做
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.11.0 — 角色系统 2：完整 blend tree（commit 2 of 6）
 - ✅ **M2.3**: `src/entities/AnimationStateMachine.js` 完整动画状态机
   - 16 个 AnimState 枚举：idle/walk/jog/run/crouch_idle/crouch_walk/jump/falling/landing/death/dance/talk/wave/punch/gesture/custom

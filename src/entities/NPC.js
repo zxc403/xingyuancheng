@@ -145,6 +145,21 @@ export class NPC {
                         }
                     } catch (e) { /* ignore anim error */ }
                 }
+                // v6.11.0: 面部 morph（仅 facecap 模型）
+                if (window.FacialExpression) {
+                    let headMesh = null;
+                    charG.traverse(c => {
+                        if (c.isMesh && c.morphTargetInfluences && c.morphTargetInfluences.length > 0) {
+                            if (!headMesh || c.morphTargetInfluences.length > headMesh.morphTargetInfluences.length) {
+                                headMesh = c;
+                            }
+                        }
+                    });
+                    if (headMesh) {
+                        npc.face = new window.FacialExpression(headMesh);
+                        npc.face.setExpression('neutral');
+                    }
+                }
             } catch (e) {
                 console.warn('[NPC.spawn] GLB clone 失败，使用兜底胶囊', e);
                 NPC._spawnFallback(g, type, npc);
@@ -216,6 +231,25 @@ export class NPC {
     static updateAll(dt) {
         for (let i = 0; i < npcList.length; i++) {
             try { npcList[i].updateAnim(dt); } catch (e) {}
+            try {
+                const npc = npcList[i];
+                if (npc.face) {
+                    npc.face.update(dt);
+                    // v6.11.0: 距离玩家近时随机表情微动
+                    if (npc.pos && window.__game && window.__game.player && window.__game.player.pos) {
+                        const pp = window.__game.player.pos;
+                        const dx = npc.pos.x - pp.x;
+                        const dz = npc.pos.z - pp.z;
+                        const d2 = dx*dx + dz*dz;
+                        if (d2 < 64) {  // 8m 内
+                            // 1% 概率/帧 触发眨眼（累积自然感）
+                            if (Math.random() < 0.005 && npc.face.triggerSub) {
+                                npc.face.triggerSub('blink', 1.0, 0.10);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {}
         }
     }
 
