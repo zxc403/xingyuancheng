@@ -12,7 +12,7 @@
     (function(){
         try {
             window._isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 1.5) : Math.min(window.devicePixelRatio||1, 2);
+            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 2.0) : Math.min(window.devicePixelRatio||1, 2);
             // 拦截未处理的 Promise 拒绝 → 不再触发 Chromium 红条
             window.addEventListener('unhandledrejection', function(e){
                 console.warn('[v6.7.1] unhandled promise:', e.reason && (e.reason.message||e.reason));
@@ -107,18 +107,31 @@
         #blocker h1 { font-size:38px; letter-spacing:8px; color:#ffd700; margin-bottom:10px; text-shadow:0 0 40px rgba(255,215,0,.1); }
         #blocker p { font-size:13px; color:#7a8a9a; letter-spacing:2px; }
         #blocker .sub { font-size:10px; color:#4a5a6a; margin-top:6px; }
-        .touch-ctrl { position:fixed; inset:0; pointer-events:none; z-index:60; display:none; touch-action:none; }
+        .touch-ctrl { position:fixed; inset:0; pointer-events:auto; z-index:60; display:none; touch-action:none; }
         .touch-ctrl.active { display:block; }
-        .joy-l { position:absolute; bottom:30px; left:20px; width:130px; height:130px; border-radius:50%; background:rgba(255,255,255,.04); border:2px solid rgba(255,255,255,.06); pointer-events:auto; touch-action:none; }
-        .joy-knob { width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.05); position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
-        .touch-view { position:absolute; top:0; right:0; width:55%; height:100%; pointer-events:auto; touch-action:none; }
-        .touch-btns { position:absolute; bottom:30px; right:14px; display:flex; flex-direction:column; gap:8px; pointer-events:none; align-items:flex-end; }
-        .t-btn { pointer-events:auto; touch-action:manipulation; min-width:48px; min-height:48px; border-radius:50%; border:1px solid rgba(255,255,255,.06); background:rgba(10,14,20,.5); backdrop-filter:blur(8px); color:#b0c0d0; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s,background .15s; }
-        .t-btn:active { transform:scale(.88); }
-        .t-btn.fire { min-width:66px; min-height:66px; font-size:20px; background:rgba(180,60,40,.15); }
-        .t-btn.fire:active { background:rgba(200,80,60,.25); }
-        .t-btn.sm { min-width:42px; min-height:42px; font-size:12px; }
-        .t-btn.act { background:rgba(60,80,120,.15); }
+        .joy-l { position:absolute; bottom:30px; left:20px; width:130px; height:130px; border-radius:50%; background:rgba(255,255,255,.06); border:2px solid rgba(255,255,255,.12); opacity:0; transition:opacity .12s; pointer-events:none; touch-action:none; }
+        .joy-l.active { opacity:1; }
+        .joy-knob { width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.1); position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
+        .touch-view { position:absolute; top:0; right:0; width:55%; height:100%; pointer-events:none; touch-action:none; }
+        .touch-btns { position:absolute; bottom:30px; right:20px; display:flex; flex-direction:column; gap:8px; pointer-events:none; align-items:flex-end; }
+        .t-btn { pointer-events:auto; touch-action:manipulation; min-width:48px; min-height:48px; border-radius:50%; border:1px solid rgba(255,255,255,.08); background:rgba(10,14,20,.55); backdrop-filter:blur(8px); color:#b0c0d0; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:transform .1s,background .15s; box-shadow:0 4px 12px rgba(0,0,0,.25); }
+        .t-btn:active { transform:scale(.88); background:rgba(30,40,50,.7); }
+        .t-btn.fire { min-width:72px; min-height:72px; font-size:22px; background:rgba(180,60,40,.25); border-color:rgba(220,80,60,.2); }
+        .t-btn.fire:active { background:rgba(220,80,60,.4); }
+        .t-btn.sm { min-width:44px; min-height:44px; font-size:12px; }
+        .t-btn.act { background:rgba(60,90,140,.25); border-color:rgba(100,140,200,.15); }
+        /* v6.10.7 (WB): PUBG 横屏右侧按钮簇 */
+        @media (orientation: landscape) {
+            .joy-l { width:150px; height:150px; bottom:40px; left:30px; }
+            .joy-knob { width:60px; height:60px; }
+            .touch-btns { bottom:40px; right:30px; display:grid; grid-template-columns: auto auto auto; grid-template-rows: auto auto auto; gap:12px; align-items:end; justify-items:end; }
+            .touch-btns .t-btn { margin:0; }
+            #btnFire { grid-column:3; grid-row:3; }
+            #btnJump { grid-column:3; grid-row:2; }
+            #btnReload { grid-column:2; grid-row:3; }
+            #btnInteract { grid-column:2; grid-row:2; }
+            #btnVehicle { grid-column:1; grid-row:3; }
+        }
         #settings { position:fixed; top:16px; right:160px; z-index:110; display:flex; gap:6px; }
         #settings .gear { background:rgba(10,14,20,.6); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.05); border-radius:10px; padding:6px 12px; color:#7a8a9a; font-size:11px; cursor:pointer; transition:background .2s; }
         #settings .gear:hover { background:rgba(30,40,50,.5); color:#b0c0d0; }
@@ -197,7 +210,7 @@
         <div class="mission-bar" id="missionBar"><div class="mission-title" id="missionTitle"></div><div class="mission-obj" id="missionObj"></div></div>
         <div class="dmg-overlay" id="dmgOverlay"></div>
     </div>
-    <div id="settings"><div class="gear" id="settingsToggle">⚙️ AI</div><div class="time-btn" id="timeBtn" title="切换昼夜">☀️ 日</div></div>
+    <div id="settings"><div class="gear" id="settingsToggle">⚙️ AI</div><div class="time-btn" id="timeBtn" title="切换昼夜">☀️ 日</div><div class="time-btn" id="landscapeBtn" title="强制横屏">📱 横</div></div>
     <div id="settings-pop"><label>DeepSeek API Key（可选·增强NPC对话）</label><input type="password" id="apiKeyInput" placeholder="sk-..."><div class="row"><button id="apiSave">💾 保存</button><button id="apiClear">🗑️ 清除</button></div><div class="status" id="apiStatus">⚪ 未设置</div></div>
     <div id="chat-panel"><button id="chatClose">✕</button><div id="chat-msgs"></div><div id="chat-input-row"><input id="chatInput" placeholder="输入你想问的..." autocomplete="off"><button id="chatSend">发送</button></div></div>
     <div class="touch-ctrl" id="touchCtrl"><div class="joy-l" id="joyL"><div class="joy-knob" id="joyKnob"></div></div><div class="touch-view" id="touchView"></div><div class="touch-btns"><button class="t-btn fire" id="btnFire">🔥</button><button class="t-btn sm act" id="btnJump">⬆</button><button class="t-btn sm act" id="btnReload">↻</button><button class="t-btn sm" id="btnInteract">✋</button><button class="t-btn sm" id="btnVehicle">🚗</button></div></div>
@@ -471,7 +484,7 @@
     let vehicles=[], npcs=[], pickups=[], projectiles=[], buildings=[], landmarks={}, glowObjs=[], particles=[];
 
     // ---- 输入 ----
-    const keys={};
+    const keys = window.keys; // v6.10.7 (WB): 与 Input 模块共享同一对象，否则摇杆输入无法驱动 updatePlayer
     let isPointerLocked=false, gamePaused=false, gameStarted=false;
     let cameraShake=0;  // v6.3: 屏幕震动强度（开火/爆炸时累加，每帧衰减）
     let gameTimeMin=12*60, gameWeather=0;   // 默认正午开启，阳光明媚
@@ -486,12 +499,12 @@
     if (isMobile) shadowQuality = 1024;
     // v6.12 (M3.1): 画质档位 0=low 1=med 2=high 3=ultra
     // 决定 bloom 强度 / SSAO 半径 / 阴影大小 / pixel ratio
-    let qualityPreset = (isMobile ? 1 : 2);  // 移动=med, 桌面=high
+    let qualityPreset = (isMobile ? 2 : 2);  // v6.10.7 (WB): 移动端也默认高质（82 FPS 设备有余量，F4/自动降级兜底）
     // 用户可手动改（通过 ? 帮派面板或快捷键 F4）
     const QUALITY_PRESETS = {
         0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.4, ssao: false,  ssaoRadius: 0.0, post: false },
-        1: { name: '均衡', pixelRatioCap: 1.25, shadow: 1024, bloomStrength: 0.7, ssao: true,  ssaoRadius: 0.3, post: true },
-        2: { name: '高质', pixelRatioCap: 1.5,  shadow: 2048, bloomStrength: 0.95, ssao: true, ssaoRadius: 0.6, post: true },
+        1: { name: '均衡', pixelRatioCap: 1.5, shadow: 1024, bloomStrength: 0.7, ssao: true,  ssaoRadius: 0.3, post: true },
+        2: { name: '高质', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 0.95, ssao: true, ssaoRadius: 0.6, post: true },
         3: { name: '极致', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 1.2, ssao: true, ssaoRadius: 0.8, post: true }
     };
     function applyQualityPreset(p) {
@@ -3371,6 +3384,15 @@
                     onTouchView: (dx, dy, baseYaw, basePitch) => {
                         player.yaw = baseYaw - dx * Math.PI * 1.4;
                         player.pitch = U.clamp(basePitch - dy * Math.PI * 0.9, -1.4, 1.4);
+                    },
+                    onTouchAction: (name) => {
+                        if (!gameStarted || gamePaused) return;
+                        const tap = (key) => { keys[key] = true; setTimeout(() => keys[key] = false, 120); };
+                        if (name === 'fire') shoot();
+                        else if (name === 'jump') tap(' ');
+                        else if (name === 'reload') reload();
+                        else if (name === 'interact') tap('e');
+                        else if (name === 'vehicle') tap('f');
                     }
                 }
             });
@@ -3576,6 +3598,29 @@
     function saveAPIKey(k) { apiKey=k; try { localStorage.setItem('deepseek_api_key', k); } catch(e){} updateAPIStatus(); }
     function updateAPIStatus() { const el=document.getElementById('apiStatus'); if(apiKey && apiKey.startsWith('sk-')){ el.textContent='✅ DeepSeek 已连接'; el.className='status ok'; } else { el.textContent='⚪ 未设置 (降级模式)'; el.className='status'; } }
     document.getElementById('settingsToggle').addEventListener('click', ()=>document.getElementById('settings-pop').classList.toggle('open'));
+
+    // v6.10.7 (WB): 强制横屏按钮（和平精英风格需要横屏操作）
+    (function(){
+        const lb = document.getElementById('landscapeBtn');
+        if (!lb) return;
+        lb.addEventListener('click', ()=>{
+            try {
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').then(()=>{
+                        showNotif('📱 已锁定横屏');
+                    }).catch(e=>{
+                        console.warn('[landscape] lock failed', e);
+                        showNotif('⚠️ 横屏锁定需要浏览器权限');
+                    });
+                } else if (screen.lockOrientation) {
+                    screen.lockOrientation('landscape');
+                    showNotif('📱 已锁定横屏');
+                } else {
+                    showNotif('⚠️ 当前浏览器不支持强制横屏，请手动旋转手机');
+                }
+            } catch(e){ console.warn('[landscape]', e); showNotif('⚠️ 横屏锁定失败'); }
+        });
+    })();
 
     // ---- v6.7: 昼夜切换按钮（赛博朋克夜城 / 白天 / 黄昏） ----
     (function(){
