@@ -1,6 +1,45 @@
 # Changelog
 
-## v6.11.0 — 角色系统 3：面部表情 morph（commit 3 of 6）
+## v6.11.0 — 角色系统 5：Avatar 自定义 + 角色 IK（commit 5 of 6）
+- ✅ **M2.5**: `src/ui/AvatarPanel.js` 玩家 Avatar 自定义 UI
+  - 6 维度调节：角色模型 / 体型 / 身高 / 肤色 / 服装 5 槽 / 玩家名字
+  - 5 个玩家可换皮角色：char_xbot / char_soldier / char_robot / char_rpm / char_knight_student
+  - U 键打开 / 关闭（与 ? 帮派面板平行），ESC 关闭
+  - 服装 5 槽（shirt/pants/shoes/gloves/hat）× 6 色板，色块 chip 实时反馈当前色
+  - "保存" 按钮写 localStorage `avatar_v6_11` + 角色 GLB key `avatar_char_v6_11`
+  - "重置" 一键还原 standard / 1.7m / tan / 默认服装 / xbot
+  - 内嵌 CSS（深色玻璃拟态 + 蓝色高亮 + 圆角 chip）
+- ✅ **Player.js** 升级
+  - 新增 `setCharacterKey(charKey)` 玩家换皮 API
+  - 切皮时保留 pos/yaw/visible，卸旧 mesh + spawn 新 GLB + 重挂 Avatar
+  - 模型未加载完时挂 `_pendingCharKey` + 一次性 500ms poll 等待
+  - `_initAvatar(charG, charKeyHint)` 接收 charKey hint，免反查
+  - 新增 `getCharacterKey()` 读取当前 avatarHint
+- ✅ **AvatarCustomization.js** 静态属性
+  - 暴露 `BODY_PRESETS / SKIN_PRESETS / OUTFIT_PALETTE / DEFAULT_CONFIG` 在类上，方便 UI 直接取
+- ✅ **index.html** 集成
+  - import AvatarPanel + IKSystem 到 window
+  - `createPlayerMesh` 末尾绑定 panel + 恢复上次的角色 GLB
+  - U 键快捷键 + help 面板新增"Avatar 自定义"提示
+- ✅ **M2.6**: `src/entities/IKSystem.js` 角色 IK 系统
+  - 3 大通道：脚部 / 视线 / 武器
+  - 脚部 IK：射线探测左右脚地形高度差 → 平滑调整 pelvis Y（fallback 到 mesh.position.y）
+  - 视线 IK：head bone 缓动转向目标（lerp 系数 dt*4，限 ±60°）
+  - 武器 IK：r_hand bone 旋转指向目标（yaw + pitch）
+  - 通用骨骼名扫描：Hips / mixamorigHips / LeftFoot / RightFoot / Head / ...
+  - 缺骨骼时降级为整体 mesh 调整，不报错
+- ✅ **Player.js** 挂 IK
+  - spawn 末尾 `this.ik = new IKSystem(this); this.ik.bind(charG)`
+  - `setCharacterKey` 切皮时卸旧 IK 让新 spawn 重建
+  - 暴露 `updateIK(dt, ctx)` 接口
+- ✅ **index.html** 主循环
+  - `updatePlayerAnim` 末尾调 `player.updateIK(dt, {targetPos, terrain, onGround, ...})`
+  - targetPos 默认取玩家正前方 8m（v6.12 接武器 raycast）
+- ⏸ mesh-bvh 精确脚部碰撞留到 v6.12
+- ⏸ 完整 CCDIKSolver（多骨链）留到 v6.12
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
+## v6.11.0 — 角色系统 4：面部表情 morph（commit 4 of 6）
 - ✅ **M2.4**: `src/entities/FacialExpression.js` 面部 morph 系统
   - 8 套主表情预设：neutral / happy / angry / sad / surprise / fear / disgust / talk
   - 10 套子表情：blink_L/R/双眼, smile, frown, mouthOpen, lookLeft/Right/Up/Down

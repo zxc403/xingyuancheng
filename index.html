@@ -222,6 +222,7 @@
         <div class="help-row"><span>存档 / 读档</span><kbd>F5</kbd> / <kbd>F9</kbd></div>
         <div class="help-row"><span>暂停</span><kbd>Esc</kbd></div>
         <div class="help-row"><span>本面板</span><kbd>?</kbd></div>
+        <div class="help-row"><span>Avatar 自定义</span><kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">U</kbd></div>
         <div style="text-align:center;margin-top:12px;font-size:11px;color:#5a6a7a;">再次按 <kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">?</kbd> 或 <kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">Esc</kbd> 关闭</div>
     </div>
     <!-- v6.1.5: 静态 WebGL 不支持大提示（默认隐藏，JS 检测到 WebGL 失败时显示） -->
@@ -327,6 +328,18 @@
     window.FacialExpression = FacialExpression;
     window.EXPRESSION_PRESETS = EXPRESSION_PRESETS;
     window.SUB_EXPRESSIONS = SUB_EXPRESSIONS;
+    // v6.11.0: Avatar 自定义
+    import { AvatarCustomization, BODY_PRESETS, SKIN_PRESETS, OUTFIT_PALETTE, DEFAULT_CONFIG } from './src/entities/AvatarCustomization.js';
+    window.AvatarCustomization = AvatarCustomization;
+    window.BODY_PRESETS = BODY_PRESETS;
+    window.SKIN_PRESETS = SKIN_PRESETS;
+    window.OUTFIT_PALETTE = OUTFIT_PALETTE;
+    // v6.11.0 (M2.5): Avatar 自定义 UI 面板
+    import { AvatarPanel } from './src/ui/AvatarPanel.js';
+    window.AvatarPanel = AvatarPanel;
+    // v6.11.0 (M2.6): 角色 IK 系统
+    import { IKSystem } from './src/entities/IKSystem.js';
+    window.IKSystem = IKSystem;
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
@@ -817,12 +830,42 @@
         if (window.__game && window.__game.player) {
             window.__game.player.spawn(scene);
         }
+        // v6.11.0 (M2.5): 实例化并绑定 Avatar 面板
+        if (window.AvatarPanel && !window.__avatarPanel) {
+            // 先恢复上次保存的角色 GLB
+            try {
+                const lastChar = localStorage.getItem('avatar_char_v6_11');
+                if (lastChar && window.__game && window.__game.player && window.__game.player.setCharacterKey) {
+                    // setCharacterKey 会处理模型未加载情况（注册一次性 poll）
+                    window.__game.player.setCharacterKey(lastChar);
+                }
+            } catch (e) {}
+            window.__avatarPanel = new window.AvatarPanel();
+            window.__avatarPanel.bindPlayer(window.__game.player);
+            console.log('[v6.11.0 M2.5] AvatarPanel 已绑定');
+        }
     }
     // v6.9: 玩家动画状态机（根据 moveSpeed 切 idle/walk/run）
     function updatePlayerAnim(dt) {
         // v6.10.3: 委托给 Player 模块
         if (window.__game && window.__game.player) {
             window.__game.player.updateAnim(dt);
+        }
+        // v6.11.0 (M2.6): 同步推进 IK
+        if (window.__game && window.__game.player && window.__game.player.updateIK) {
+            // 武器 / 视线目标：取玩家正前方 8m（v6.11 占位，v6.12 接武器 raycast）
+            const p = window.__game.player;
+            const fwd = 8;
+            const tx = p.pos.x + Math.sin(p.yaw) * fwd;
+            const tz = p.pos.z + Math.cos(p.yaw) * fwd;
+            const ty = (window.getTerrainH ? window.getTerrainH(p.pos.x, p.pos.z) : 0) + 1.5;
+            window.__game.player.updateIK(dt, {
+                targetPos: { x: tx, y: ty, z: tz },
+                terrain: window.getTerrainH,
+                onGround: p.onGround !== false,
+                inCombat: false,  // v6.11 不与战斗联动，避免和动画冲突
+                moving: Math.hypot(p.vel.x, p.vel.z) > 0.2
+            });
         }
     }
 
@@ -3188,6 +3231,10 @@
             }
             if(e.key==='?'||e.key==='/'||k==='?'){
                 document.getElementById('helpPanel').classList.toggle('show');
+            }
+            // v6.11.0 (M2.5): Avatar 自定义面板（U 键打开 / 关闭）
+            if (k === 'u' && window.__avatarPanel) {
+                window.__avatarPanel.toggle();
             }
             // v6.11.0: 动画演示快捷键
             if (k === 'j' && window.__game && window.__game.player && window.__game.player.playAction) {

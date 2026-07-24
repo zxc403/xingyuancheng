@@ -59,6 +59,8 @@ export class Player {
         this.acts = null;  // { idle, walk, run, currentAct }
         this.sm = null;    // v6.11.0: AnimationStateMachine
         this.face = null;  // v6.11.0: FacialExpression（facecap 模型专用）
+        this.avatar = null;  // v6.11.0: AvatarCustomization
+        this.ik = null;    // v6.11.0 (M2.6): IKSystem
 
         // 染色
         this.tint = 0x4488ff;  // 玩家衣服颜色（默认蓝）
@@ -155,12 +157,42 @@ export class Player {
             if (scene) scene.add(charG);
             // v6.11.0: 初始化 FacialExpression（facecap 模型 / 其他带 morph 的模型可用）
             this._initFace(charG);
+            // v6.11.0: 初始化 AvatarCustomization（传入已知的 charKey）
+            this._initAvatar(charG, key);
             console.log('[Player.spawn] 玩家 GLB 注入完成', key,
                 'animations:', src && src.animations && src.animations.length);
+            // v6.11.0 (M2.6): 绑定 IK（找骨骼）
+            this.ik = new IKSystem(this);
+            this.ik.bind(charG);
         } catch (e) {
             console.warn('[Player.spawn] 失败，使用胶囊', e);
             this._spawnFallback(scene);
         }
+    }
+
+    /**
+     * v6.11.0: 初始化 AvatarCustomization（从注册表读 tint 配置 + localStorage 恢复）
+     * @param {THREE.Group} charG
+     * @param {string} [charKeyHint]   已知的 charKey（M2.5 换皮时传入）
+     */
+    _initAvatar(charG, charKeyHint) {
+        if (!window.AvatarCustomization) return;
+        // 优先用 hint，其次从 _realModels 反查
+        let charKey = charKeyHint || 'char_xbot';
+        if (!charKeyHint && window._realModels) {
+            for (const k of Object.keys(window._realModels)) {
+                if (window._realModels[k] === charG) {
+                    charKey = k;
+                    break;
+                }
+            }
+        }
+        this.avatarHint = { charKey };
+        const charDef = window.getCharReg ? window.getCharReg(charKey) : null;
+        this.avatar = new window.AvatarCustomization(this, charDef);
+        // 从 localStorage 恢复
+        this.avatar.loadFromStorage();
+        console.log('[Player._initAvatar] 完成，charKey=', charKey);
     }
 
     /**
@@ -182,6 +214,74 @@ export class Player {
             console.log('[Player._initFace] 找到面部 mesh，morph 数量=',
                 headMesh.morphTargetInfluences.length);
         }
+    }
+
+    /**
+     * v6.11.0 (M2.5): 切换玩家 GLB 身体
+     * 先从 scene 移除旧 mesh，再 spawn 新的 charKey
+     * @param {string} charKey   CharacterRegistry 里的 key
+     * @returns {boolean} 成功
+     */
+    setCharacterKey(charKey) {
+        if (!charKey) return false;
+        const def = window.getCharReg ? window.getCharReg(charKey) : null;
+        if (!def) {
+            console.warn('[Player.setCharacterKey] 未注册:', charKey);
+            return false;
+        }
+        // v6.11.0: 等模型加载完成才能切
+        if (!window._realModels || !window._realModels[charKey]) {
+            console.warn('[Player.setCharacterKey] 模型未加载:', charKey, '，稍后重试');
+            this._pendingCharKey = charKey;
+            // 注册一次性 hook：等模型可用时再切换
+            if (!window.__avatarPendingPoll) {
+                window.__avatarPendingPoll = setInterval(() => {
+                    const pending = window.__game && window.__game.player && window.__game.player._pendingCharKey;
+                    if (pending && window._realModels && window._realModels[pending]) {
+                        const p = window.__game.player;
+                        p._pendingCharKey = null;
+                        clearInterval(window.__avatarPendingPoll);
+                        window.__avatarPendingPoll = null;
+                        p.setCharacterKey(pending);
+                    }
+                }, 500);
+            }
+            return false;
+        }
+        // 记下当前 pos/yaw/可见性，新 mesh 沿用
+        const keepPos = { ...this.pos };
+        const keepYaw = this.yaw;
+        const keepVisible = this.mesh ? this.mesh.visible : true;
+        const scene = this.mesh && this.mesh.parent;
+        // 卸旧 mesh
+        if (this.mesh && this.mesh.parent) this.mesh.parent.remove(this.mesh);
+        // 卸旧 mixer
+        this.mixer = null;
+        this.acts = null;
+        this.sm = null;
+        this.face = null;
+        this.avatar = null;
+        this.ik = null;  // v6.11.0 (M2.6): 卸旧 IK，新 spawn 重新绑
+        this.mesh = null;
+        // 用新 charKey 重新 spawn
+        this.targetHeight = def.size || 1.7;
+        if (this.avatarHint) this.avatarHint.charKey = charKey;
+        this.spawn(scene);
+        // 还原
+        this.pos = keepPos;
+        this.yaw = keepYaw;
+        if (this.mesh) this.mesh.visible = keepVisible;
+        // 重新挂 Avatar（走 charDef）
+        if (window.AvatarCustomization) {
+            this.avatar = new window.AvatarCustomization(this, def);
+            this.avatar.loadFromStorage();
+        }
+        console.log('[Player.setCharacterKey] 切换完成 ->', charKey);
+        return true;
+    }
+
+    getCharacterKey() {
+        return this.avatarHint ? this.avatarHint.charKey : 'char_xbot';
     }
 
     /**
@@ -241,6 +341,16 @@ export class Player {
     playAction(stateName) {
         if (!this.sm) return false;
         return this.sm.playOnce(stateName);
+    }
+
+    /**
+     * v6.11.0 (M2.6): 推进 IK（脚 / 视线 / 武器）
+     * 由 index.html 每帧调用
+     * @param {number} dt
+     * @param {object} ctx   { targetPos, terrain, onGround, inCombat, moving }
+     */
+    updateIK(dt, ctx) {
+        if (this.ik) this.ik.update(dt, ctx);
     }
 
     /**
