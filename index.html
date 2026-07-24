@@ -307,25 +307,25 @@
     import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
     // v6.12 (M3.2): 自研 FilmShader（Vignette + Grain + 轻量 FXAA）
-    import { FilmShader } from './src/core/FilmShader.js?v=3';
+    import { FilmShader } from './src/core/FilmShader.js?v=4';
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
     // v6.10.1: 抽离 Renderer 模块
-    import { Renderer as RendererModule } from './src/core/Renderer.js?v=3';
+    import { Renderer as RendererModule } from './src/core/Renderer.js?v=4';
     window.RendererModule = RendererModule;
     // v6.10.6: 渲染后端抽象层
-    import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js?v=3';
+    import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js?v=4';
     // v6.10.2: 抽离 Input 模块
-    import { Input as InputModule } from './src/core/Input.js?v=3';
+    import { Input as InputModule } from './src/core/Input.js?v=4';
     // v6.10.3: 抽离 Player 实体
-    import { Player as PlayerModule } from './src/entities/Player.js?v=3';
+    import { Player as PlayerModule } from './src/entities/Player.js?v=4';
     // v6.10.4: 抽离 NPC + Vehicle 实体
-    import { NPC as NPCModule } from './src/entities/NPC.js?v=3';
-    import { Vehicle as VehicleModule } from './src/entities/Vehicle.js?v=3';
+    import { NPC as NPCModule } from './src/entities/NPC.js?v=4';
+    import { Vehicle as VehicleModule } from './src/entities/Vehicle.js?v=4';
     // v6.10.5: 抽离 Collision + Pathfinder
-    import { Collision as CollisionModule } from './src/physics/Collision.js?v=3';
-    import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js?v=3';
+    import { Collision as CollisionModule } from './src/physics/Collision.js?v=4';
+    import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js?v=4';
     // v6.11.0: 角色中央注册表
     import {
         CHARACTERS,
@@ -336,27 +336,27 @@
         exportLoadList as exportCharLoadList,
         pickClip as pickAnimClip,
         dumpRegistry as dumpCharRegistry
-    } from './src/entities/CharacterRegistry.js?v=3';
+    } from './src/entities/CharacterRegistry.js?v=4';
     // v6.11.0: 动画状态机（NPC 子模块通过 window 访问）
-    import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js?v=3';
+    import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js?v=4';
     window.AnimationStateMachine = AnimationStateMachine;
     window.AnimState = AnimState;
     // v6.11.0: 面部表情 morph 系统
-    import { FacialExpression, EXPRESSION_PRESETS, SUB_EXPRESSIONS } from './src/entities/FacialExpression.js?v=3';
+    import { FacialExpression, EXPRESSION_PRESETS, SUB_EXPRESSIONS } from './src/entities/FacialExpression.js?v=4';
     window.FacialExpression = FacialExpression;
     window.EXPRESSION_PRESETS = EXPRESSION_PRESETS;
     window.SUB_EXPRESSIONS = SUB_EXPRESSIONS;
     // v6.11.0: Avatar 自定义
-    import { AvatarCustomization, BODY_PRESETS, SKIN_PRESETS, OUTFIT_PALETTE, DEFAULT_CONFIG } from './src/entities/AvatarCustomization.js?v=3';
+    import { AvatarCustomization, BODY_PRESETS, SKIN_PRESETS, OUTFIT_PALETTE, DEFAULT_CONFIG } from './src/entities/AvatarCustomization.js?v=4';
     window.AvatarCustomization = AvatarCustomization;
     window.BODY_PRESETS = BODY_PRESETS;
     window.SKIN_PRESETS = SKIN_PRESETS;
     window.OUTFIT_PALETTE = OUTFIT_PALETTE;
     // v6.11.0 (M2.5): Avatar 自定义 UI 面板
-    import { AvatarPanel } from './src/ui/AvatarPanel.js?v=3';
+    import { AvatarPanel } from './src/ui/AvatarPanel.js?v=4';
     window.AvatarPanel = AvatarPanel;
     // v6.11.0 (M2.6): 角色 IK 系统
-    import { IKSystem } from './src/entities/IKSystem.js?v=3';
+    import { IKSystem } from './src/entities/IKSystem.js?v=4';
     window.IKSystem = IKSystem;
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
@@ -375,21 +375,21 @@
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     let GLTFLoaderPromise = null;
-    // 用 ./vendor/... 相对路径（带 ?v=3 缓存破坏），不走 import map（因为 import map 不支持在映射前缀外加 query string）
-    GLTFLoaderPromise = fetch('./vendor/three/addons/loaders/GLTFLoader.js?v=3', {method:'HEAD'}).then(function(r){
+    // 用 ./vendor/... 相对路径（带 ?v=4 缓存破坏），不走 import map（因为 import map 不支持在映射前缀外加 query string）
+    GLTFLoaderPromise = fetch('./vendor/three/addons/loaders/GLTFLoader.js?v=4', {method:'HEAD'}).then(function(r){
         if(r.ok){
-            return import('./vendor/three/addons/loaders/GLTFLoader.js?v=3');
+            return import('./vendor/three/addons/loaders/GLTFLoader.js?v=4');
         }
     }).then(function(m){ if(m) GLTFLoader = m.GLTFLoader; }).catch(function(){});
 
     // v6.11.2 (WB): 补齐 DRACO + KTX2 解码器，支持压缩模型（LittlestTokyo 用 Draco，部分 PBR 用 KTX2）
     let DRACOLoader = null, KTX2Loader = null;
     let DRACOLoaderPromise = null, KTX2LoaderPromise = null;
-    DRACOLoaderPromise = fetch('./vendor/three/addons/loaders/DRACOLoader.js?v=3', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('./vendor/three/addons/loaders/DRACOLoader.js?v=3'); }
+    DRACOLoaderPromise = fetch('./vendor/three/addons/loaders/DRACOLoader.js?v=4', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('./vendor/three/addons/loaders/DRACOLoader.js?v=4'); }
     }).then(function(m){ if(m) DRACOLoader = m.DRACOLoader; }).catch(function(){});
-    KTX2LoaderPromise = fetch('./vendor/three/addons/loaders/KTX2Loader.js?v=3', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('./vendor/three/addons/loaders/KTX2Loader.js?v=3'); }
+    KTX2LoaderPromise = fetch('./vendor/three/addons/loaders/KTX2Loader.js?v=4', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('./vendor/three/addons/loaders/KTX2Loader.js?v=4'); }
     }).then(function(m){ if(m) KTX2Loader = m.KTX2Loader; }).catch(function(){});
 
     // ---- 工具 ----
@@ -864,41 +864,41 @@
         }
         const list = [
             // 建筑
-            { key: 'building_city', url: 'assets/models/buildings/city_building.glb?v=3' },
-            { key: 'building_block', url: 'assets/models/buildings/city_block.glb?v=3' },
+            { key: 'building_city', url: 'assets/models/buildings/city_building.glb?v=4' },
+            { key: 'building_block', url: 'assets/models/buildings/city_block.glb?v=4' },
             // 车辆（v6.2 修：磁盘上是 car1_truck.glb / car2_dragster.glb / car3_minivan.glb / cars_big_set.glb）
-            { key: 'car_truck',     url: 'assets/models/vehicles/car1_truck.glb?v=3' },
-            { key: 'car_dragster',  url: 'assets/models/vehicles/car2_dragster.glb?v=3' },
-            { key: 'car_minivan',   url: 'assets/models/vehicles/car3_minivan.glb?v=3' },
-            { key: 'car_bigset',    url: 'assets/models/vehicles/cars_big_set.glb?v=3' },
-            { key: 'car_mustang',   url: 'assets/models/vehicles/mustang.glb?v=3' },
+            { key: 'car_truck',     url: 'assets/models/vehicles/car1_truck.glb?v=4' },
+            { key: 'car_dragster',  url: 'assets/models/vehicles/car2_dragster.glb?v=4' },
+            { key: 'car_minivan',   url: 'assets/models/vehicles/car3_minivan.glb?v=4' },
+            { key: 'car_bigset',    url: 'assets/models/vehicles/cars_big_set.glb?v=4' },
+            { key: 'car_mustang',   url: 'assets/models/vehicles/mustang.glb?v=4' },
             // v6.8 新增：Khronos PBR Showcase 高质量模型
-            { key: 'pbr_ferrari',   url: 'assets/models/pbr_assets/Ferrari.glb?v=3' },
-            { key: 'pbr_car_concept', url: 'assets/models/pbr_assets/CarConcept.glb?v=3' },
-            { key: 'pdr_helmet',    url: 'assets/models/pbr_assets/DamagedHelmet.glb?v=3' },
-            { key: 'pbr_lantern',   url: 'assets/models/pbr_assets/Lantern.glb?v=3' },
-            { key: 'pbr_boombox',   url: 'assets/models/pbr_assets/BoomBox.glb?v=3' },
-            { key: 'pbr_avocado',   url: 'assets/models/pbr_assets/Avocado.glb?v=3' },
-            { key: 'pbr_camera',    url: 'assets/models/pbr_assets/AntiqueCamera.glb?v=3' },
-            { key: 'pbr_dragon',    url: 'assets/models/pbr_assets/DragonAttenuation.glb?v=3' },
-            { key: 'pbr_brainstem', url: 'assets/models/pbr_assets/BrainStem.glb?v=3' },
-            { key: 'pbr_fish',      url: 'assets/models/pbr_assets/BarramundiFish.glb?v=3' },
-            { key: 'pbr_horse',     url: 'assets/models/pbr_assets/Horse.glb?v=3' },
-            { key: 'pbr_tokyo',     url: 'assets/models/pbr_assets/LittlestTokyo.glb?v=3' },
-            { key: 'pbr_flamingo',  url: 'assets/models/pbr_assets/Flamingo.glb?v=3' },
-            { key: 'pbr_stork',     url: 'assets/models/pbr_assets/Stork.glb?v=3' },
-            { key: 'pbr_cesium',    url: 'assets/models/pbr_assets/CesiumMan.glb?v=3' },
+            { key: 'pbr_ferrari',   url: 'assets/models/pbr_assets/Ferrari.glb?v=4' },
+            { key: 'pbr_car_concept', url: 'assets/models/pbr_assets/CarConcept.glb?v=4' },
+            { key: 'pdr_helmet',    url: 'assets/models/pbr_assets/DamagedHelmet.glb?v=4' },
+            { key: 'pbr_lantern',   url: 'assets/models/pbr_assets/Lantern.glb?v=4' },
+            { key: 'pbr_boombox',   url: 'assets/models/pbr_assets/BoomBox.glb?v=4' },
+            { key: 'pbr_avocado',   url: 'assets/models/pbr_assets/Avocado.glb?v=4' },
+            { key: 'pbr_camera',    url: 'assets/models/pbr_assets/AntiqueCamera.glb?v=4' },
+            { key: 'pbr_dragon',    url: 'assets/models/pbr_assets/DragonAttenuation.glb?v=4' },
+            { key: 'pbr_brainstem', url: 'assets/models/pbr_assets/BrainStem.glb?v=4' },
+            { key: 'pbr_fish',      url: 'assets/models/pbr_assets/BarramundiFish.glb?v=4' },
+            { key: 'pbr_horse',     url: 'assets/models/pbr_assets/Horse.glb?v=4' },
+            { key: 'pbr_tokyo',     url: 'assets/models/pbr_assets/LittlestTokyo.glb?v=4' },
+            { key: 'pbr_flamingo',  url: 'assets/models/pbr_assets/Flamingo.glb?v=4' },
+            { key: 'pbr_stork',     url: 'assets/models/pbr_assets/Stork.glb?v=4' },
+            { key: 'pbr_cesium',    url: 'assets/models/pbr_assets/CesiumMan.glb?v=4' },
             // 场景
-            { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb?v=3' },
+            { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb?v=4' },
             // 角色（v6.11.0: 从 CharacterRegistry 注册表批量生成，18 个角色）
             //     删字符硬编码，所有新增角色走 src/entities/CharacterRegistry.js
             ...exportCharLoadList(),
             // v6.2 新增：道具（用于替换 pickup/glow/摊位）
-            { key: 'prop_chest',       url: 'assets/models/props/chest.glb?v=3' },
-            { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb?v=3' },
-            { key: 'prop_torch',       url: 'assets/models/props/torch_mounted.gltf.glb?v=3' },
-            { key: 'prop_barrier',     url: 'assets/models/props/barrier_column.gltf.glb?v=3' },
-            { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb?v=3' },
+            { key: 'prop_chest',       url: 'assets/models/props/chest.glb?v=4' },
+            { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb?v=4' },
+            { key: 'prop_torch',       url: 'assets/models/props/torch_mounted.gltf.glb?v=4' },
+            { key: 'prop_barrier',     url: 'assets/models/props/barrier_column.gltf.glb?v=4' },
+            { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb?v=4' },
         ];
         // v6.2 改：并发加载（之前是串行，5 个角色 GLB 每个 3.5M 串行要 8+ 秒）
         const tasks = list.map(it => (async () => {
