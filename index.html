@@ -374,20 +374,22 @@
     window.__game.pathfinder = new PathfinderModule();
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
-    // 用相对路径预检 GLTFLoader 是否存在
-    fetch('vendor/three/addons/loaders/GLTFLoader.js', {method:'HEAD'}).then(function(r){
+    let GLTFLoaderPromise = null;
+    // 用相对路径预检 GLTFLoader 是否存在（加 ?v=3 缓存破坏，避免移动浏览器缓存 404）
+    GLTFLoaderPromise = fetch('vendor/three/addons/loaders/GLTFLoader.js?v=3', {method:'HEAD'}).then(function(r){
         if(r.ok){
-            return import('three/addons/loaders/GLTFLoader.js');
+            return import('vendor/three/addons/loaders/GLTFLoader.js?v=3');
         }
     }).then(function(m){ if(m) GLTFLoader = m.GLTFLoader; }).catch(function(){});
 
     // v6.11.2 (WB): 补齐 DRACO + KTX2 解码器，支持压缩模型（LittlestTokyo 用 Draco，部分 PBR 用 KTX2）
     let DRACOLoader = null, KTX2Loader = null;
-    fetch('vendor/three/addons/loaders/DRACOLoader.js', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('three/addons/loaders/DRACOLoader.js'); }
+    let DRACOLoaderPromise = null, KTX2LoaderPromise = null;
+    DRACOLoaderPromise = fetch('vendor/three/addons/loaders/DRACOLoader.js?v=3', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('vendor/three/addons/loaders/DRACOLoader.js?v=3'); }
     }).then(function(m){ if(m) DRACOLoader = m.DRACOLoader; }).catch(function(){});
-    fetch('vendor/three/addons/loaders/KTX2Loader.js', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('three/addons/loaders/KTX2Loader.js'); }
+    KTX2LoaderPromise = fetch('vendor/three/addons/loaders/KTX2Loader.js?v=3', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('vendor/three/addons/loaders/KTX2Loader.js?v=3'); }
     }).then(function(m){ if(m) KTX2Loader = m.KTX2Loader; }).catch(function(){});
 
     // ---- 工具 ----
@@ -841,6 +843,10 @@
         if (window.__game && window.__game.collision && typeof scene !== 'undefined' && scene) {
             window.__game.collision.init(scene);
         }
+        // v6.11.3: 等待解码器模块加载完成（避免移动网络下 GLTFLoader 异步导入竞态导致回退）
+        if (GLTFLoaderPromise) await GLTFLoaderPromise;
+        if (DRACOLoaderPromise) await DRACOLoaderPromise;
+        if (KTX2LoaderPromise) await KTX2LoaderPromise;
         if (!GLTFLoader) { console.warn('[loadRealModels] GLTFLoader 未加载，跳过真实模型，回退程序化'); return; }
         const loader = new GLTFLoader();
         // v6.11.2 (WB): 挂接 DRACO / KTX2 解码器（若存在），支持压缩模型
