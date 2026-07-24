@@ -2243,12 +2243,12 @@
 
                 // v6.11.0: AnimationMixer 初始化（用 CharacterRegistry.pickClip 替换硬编码关键词）
                 const src = window._realModelsSrc && window._realModelsSrc[glbKey];
-                const charDef = getCharReg(glbKey);
+                const charDef2 = getCharReg(glbKey);
                 if (src && src.animations && src.animations.length) {
                     try {
                         const mixer = new THREE.AnimationMixer(charG);
                         // v6.11.0: 从注册表读 clipMap（替代硬编码 'idle'/'walk'/'run' 关键词）
-                        const cm = (charDef && charDef.clipMap) || {};
+                        const cm = (charDef2 && charDef2.clipMap) || {};
                         const idle = pickAnimClip(src.animations, 'idle', cm.idle) || src.animations[0];
                         const walk = pickAnimClip(src.animations, 'walk', cm.walk) || idle;
                         const run  = pickAnimClip(src.animations, 'run',  cm.run)  || walk;
