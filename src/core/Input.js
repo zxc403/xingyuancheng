@@ -16,6 +16,8 @@ export class Input {
     constructor() {
         // 键盘/摇杆状态（与 index.html 共享 window.keys）
         this.keys = {};
+        // v6.10.7-fix: 实例化时立刻暴露 window.keys，让 index.html 的 const keys = window.keys 能取到对象
+        window.keys = this.keys;
         // 鼠标状态
         this.mouse = { dx: 0, dy: 0, left: false, right: false, locked: false };
         // 触摸状态
