@@ -657,20 +657,35 @@
         night_a: 'assets/hdri/qwantani_night_2k.hdr',          // 6.5MB 非洲星空夜
         night_b: 'assets/hdri/moonless_golf_2k.hdr',           // 6.4MB 无月乡村夜
         night_c: 'assets/hdri/neon_photostudio_2k.hdr',        // 6.1MB 霓虹摄影棚（赛博朋克）
-        dusk:    'assets/hdri/the_sky_is_on_fire_2k.hdr'       // 5.8MB 火烧云黄昏
+        dusk:    'assets/hdri/the_sky_is_on_fire_2k.hdr',      // 5.8MB 火烧云黄昏
+        // v6.13 (WB): Poly Haven CC0 扩充昼夜变体（无水印 / 可商用 / 已 MD5 校验）
+        dawn:        'assets/hdri/ph_dawn_bell_park.hdr',      // 黎明  Bell Park Dawn
+        day_puresky: 'assets/hdri/ph_day_puresky.hdr',         // 正午纯天空  Aristea Wreck (Pure Sky)
+        day_clear:   'assets/hdri/ph_day_clear.hdr',           // 晴朗蓝天  Kloofendal
+        overcast:    'assets/hdri/ph_overcast.hdr',            // 阴天  Farmland Overcast
+        sunset_a:    'assets/hdri/ph_sunset_venice.hdr',       // 威尼斯黄昏
+        sunset_b:    'assets/hdri/ph_sunset_dikhololo.hdr',    // 迪克霍洛黄昏
+        night_d:     'assets/hdri/ph_night_dikhololo.hdr',     // 迪克霍洛夜
+        night_e:     'assets/hdri/ph_night_clarens.hdr'        // 克莱伦斯夜
     };
     let currentHDRKey = 'day_1k';
     function _applyHDRTex(tex) {
         if (!tex || !scene) return;
         tex.mapping = THREE.EquirectangularReflectionMapping;
+        window._curEqHDR = tex;   // v6.13 (WB): 保留等距纹理供「HDRI 真实天空」开关使用
         const pmrem = new THREE.PMREMGenerator(renderer);
         const envRT = pmrem.fromEquirectangular(tex);
         pmrem.dispose();
-        tex.dispose();
+        // 注意：不再 tex.dispose()，保留给 scene.background（toggleHDRISky）
         scene.environment = envRT.texture;
     }
     async function setTimeOfDay(mode) {
-        const map = { day:'day_4k', night:'night_c', dusk:'dusk' };
+        const map = {
+            day:'day_4k', day_clear:'day_clear', day_puresky:'day_puresky',
+            dawn:'dawn', overcast:'overcast',
+            dusk:'dusk', sunset:'sunset_a', sunset_b:'sunset_b',
+            night:'night_c', night_d:'night_d', night_e:'night_e'
+        };
         const key = map[mode] || 'day_4k';
         if (key === currentHDRKey && scene && scene.environment) return;
         currentHDRKey = key;
@@ -679,7 +694,11 @@
             const loader = new THREE.RGBELoader();
             const tex = await loader.loadAsync(url);
             _applyHDRTex(tex);
-            if (mode === 'night') {
+            const isNight = mode==='night'||mode==='night_d'||mode==='night_e';
+            const isDusk  = mode==='dusk'||mode==='sunset'||mode==='sunset_b';
+            const isDawn  = mode==='dawn';
+            const isOver  = mode==='overcast';
+            if (isNight) {
                 scene.background = null;
                 scene.fog = new THREE.FogExp2(0x05060c, 0.018);
                 if (window._sun) { window._sun.intensity = 0.15; window._sun.color.setHex(0x6080a0); }
@@ -687,7 +706,7 @@
                 if (window._hemisphere) { window._hemisphere.intensity = 0.35; }
                 if (renderer) renderer.toneMappingExposure = 0.9;
                 console.log('[HDR] 切换 → 夜城霓虹', url);
-            } else if (mode === 'dusk') {
+            } else if (isDusk) {
                 scene.background = null;
                 scene.fog = new THREE.FogExp2(0x2a0e08, 0.012);
                 if (window._sun) { window._sun.intensity = 0.6; window._sun.color.setHex(0xff7733); }
@@ -695,6 +714,22 @@
                 if (window._hemisphere) { window._hemisphere.intensity = 0.6; }
                 if (renderer) renderer.toneMappingExposure = 1.1;
                 console.log('[HDR] 切换 → 黄昏火烧云', url);
+            } else if (isDawn) {
+                scene.background = null;
+                scene.fog = new THREE.FogExp2(0x2a2030, 0.010);
+                if (window._sun) { window._sun.intensity = 0.5; window._sun.color.setHex(0xffa060); }
+                if (window._ambient) { window._ambient.intensity = 0.4; window._ambient.color.setHex(0x554055); }
+                if (window._hemisphere) { window._hemisphere.intensity = 0.55; }
+                if (renderer) renderer.toneMappingExposure = 1.0;
+                console.log('[HDR] 切换 → 黎明', url);
+            } else if (isOver) {
+                scene.background = null;
+                scene.fog = new THREE.FogExp2(0x8a93a0, 0.014);
+                if (window._sun) { window._sun.intensity = 0.7; window._sun.color.setHex(0xcfd6dd); }
+                if (window._ambient) { window._ambient.intensity = 0.5; window._ambient.color.setHex(0xc8ced6); }
+                if (window._hemisphere) { window._hemisphere.intensity = 0.65; }
+                if (renderer) renderer.toneMappingExposure = 0.95;
+                console.log('[HDR] 切换 → 阴天', url);
             } else {
                 scene.background = null;
                 scene.fog = new THREE.FogExp2(0x9bb3cc, 0.008);
@@ -702,13 +737,30 @@
                 if (window._ambient) { window._ambient.intensity = 0.55; window._ambient.color.setHex(0xffffff); }
                 if (window._hemisphere) { window._hemisphere.intensity = 0.7; }
                 if (renderer) renderer.toneMappingExposure = 1.0;
-                console.log('[HDR] 切换 → 白日多云', url);
+                console.log('[HDR] 切换 → 白日', url);
             }
             if (window.updateTimeHUD) window.updateTimeHUD(mode);
         } catch (e) {
             console.warn('[HDR] 加载失败', url, e);
         }
     }
+    // v6.13 (WB): HDRI 真实天空开关（一键将可见天空从程序化穹顶切到真实 HDRI）
+    window.toggleHDRISky = function(){
+        try {
+            if (!window._skyDome) { showNotif('⚠️ 天空穹顶未就绪'); return; }
+            window._hdriSkyOn = !window._hdriSkyOn;
+            window._skyDome.visible = !window._hdriSkyOn;
+            if (window._hdriSkyOn && window._curEqHDR) {
+                scene.background = window._curEqHDR;
+                showNotif('🌌 HDRI 真实天空：开（程序化穹顶已隐藏，按 B 切回）');
+            } else {
+                window._hdriSkyOn = false;
+                window._skyDome.visible = true;
+                scene.background = null;
+                showNotif('🌤️ 程序化穹顶：开');
+            }
+        } catch(e){ console.warn('[HDR] toggle sky failed', e); showNotif('⚠️ HDRI 天空切换失败'); }
+    };
     async function loadRealHDR() {
         const loader = new THREE.RGBELoader();
         // 首屏：1K (6.7MB)，约 1.5s 出图
@@ -727,10 +779,11 @@
                         const loader4k = new THREE.RGBELoader();
                         const tex4k = await loader4k.loadAsync('assets/hdri/kloppenheim_06_4k.hdr');
                         tex4k.mapping = THREE.EquirectangularReflectionMapping;
+                        window._curEqHDR = tex4k;   // v6.13 (WB): 保留给 HDRI 真实天空开关
                         const pmrem2 = new THREE.PMREMGenerator(renderer);
                         const env4k = pmrem2.fromEquirectangular(tex4k);
                         pmrem2.dispose();
-                        tex4k.dispose();
+                        // tex4k.dispose() 省略：保留给 scene.background（toggleHDRISky）
                         if (scene) scene.environment = env4k.texture;
                         console.log('[RealHDR] 4K kloppenheim_06 已升级（17.4MB）');
                     } catch(e) {
@@ -3344,6 +3397,10 @@
                 gameWeather = (gameWeather + 1) % 5;
                 showNotif('天气切换：'+weatherNames[Math.floor(gameWeather)]);
             }
+            // v6.13 (WB): B 键切换 HDRI 真实天空（程序化穹顶 ↔ 照片级 HDRI）
+            if(k==='b'){
+                if (typeof window.toggleHDRISky === 'function') window.toggleHDRISky();
+            }
             if(k==='n'){
                 gameTimeMin = (gameTimeMin + 360) % 1440;
                 showNotif('时间快进到 '+getTimeStr());
@@ -3523,8 +3580,8 @@
     // ---- v6.7: 昼夜切换按钮（赛博朋克夜城 / 白天 / 黄昏） ----
     (function(){
         const btn = document.getElementById('timeBtn');
-        const order = ['day','dusk','night'];
-        const label = { day:'☀️ 日', dusk:'🌇 黄昏', night:'🌃 夜' };
+        const order = ['day','dawn','overcast','dusk','night'];
+        const label = { day:'☀️ 日', dawn:'🌅 黎明', overcast:'☁️ 阴', dusk:'🌇 黄昏', night:'🌃 夜' };
         let idx = 0;
         function setBtn(mode){
             btn.textContent = label[mode];

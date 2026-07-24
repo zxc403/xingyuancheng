@@ -35,3 +35,21 @@ Assets already present in `assets/models/` (characters, vehicles, PBR samples, p
 
 - **License:** CC0 (Public Domain)
 - **Used:** `assets/models/kenney/pedestrians/` — 18 blocky pedestrian characters (NPC placeholders)
+
+## Poly Haven HDRIs (Sky / Environment Maps)
+
+- **Source:** https://polyhaven.com (HDRI CDN: `https://dl.polyhaven.org`)
+- **License:** CC0 (Public Domain) — free for commercial and personal use, no attribution required (attribution appreciated)
+- **Used in `assets/hdri/`:**
+  - `day_quarry.hdr`, `kloppenheim_06_4k.hdr` — daytime sky (existing)
+  - `qwantani_night_2k.hdr`, `moonless_golf_2k.hdr`, `neon_photostudio_2k.hdr` — night / cyberpunk (existing)
+  - `the_sky_is_on_fire_2k.hdr` — dusk (existing)
+  - `ph_dawn_bell_park.hdr` — Bell Park Dawn (v6.13 WB 新增)
+  - `ph_day_puresky.hdr` — Aristea Wreck (Pure Sky) (v6.13 WB 新增)
+  - `ph_day_clear.hdr` — Kloofendal (v6.13 WB 新增)
+  - `ph_overcast.hdr` — Farmland Overcast (v6.13 WB 新增)
+  - `ph_sunset_venice.hdr` — Venice Sunset (v6.13 WB 新增)
+  - `ph_sunset_dikhololo.hdr` — Dikhololo Sunset (v6.13 WB 新增)
+  - `ph_night_dikhololo.hdr` — Dikhololo Night (v6.13 WB 新增)
+  - `ph_night_clarens.hdr` — Clarens Night 01 (v6.13 WB 新增)
+- **Note:** All HDRIs are CC0 and watermark-free, downloaded directly from Poly Haven — no AI-generated/watermarked imagery used.
