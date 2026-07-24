@@ -116,4 +116,45 @@ export class Renderer {
         this._global.composer = this.composer;
         this._global.clock = this.clock;
     }
+
+    /**
+     * v6.12 (M3.4): PBR 材质批量增强
+     * 遍历 scene 所有 MeshStandardMaterial / MeshPhysicalMaterial：
+     *   - envMapIntensity 自动放大到 1.2×（除非材质已经显式 ≥ 2.0）
+     *   - metalness > 0.5 的物体加 clearcoat 0.3（车漆质感）
+     * @param {THREE.Scene} scene
+     * @param {Object} opts
+     *   envMapIntensityMul  number  乘子（默认 1.2）
+     *   skipNames           RegExp  跳过材质名匹配
+     *   dryRun              bool    只统计不修改
+     * @returns {{total:number, enhanced:number, skipped:number}}
+     */
+    static enhancePBR(scene, opts = {}) {
+        const mul = opts.envMapIntensityMul || 1.2;
+        const skip = opts.skipNames;
+        const dry = !!opts.dryRun;
+        let total = 0, enhanced = 0, skipped = 0;
+        if (!scene) return { total, enhanced, skipped };
+        scene.traverse(obj => {
+            if (!obj.isMesh || !obj.material) return;
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            for (const m of mats) {
+                total++;
+                const isPBR = m.isMeshStandardMaterial || m.isMeshPhysicalMaterial ||
+                              m.type === 'MeshStandardMaterial' || m.type === 'MeshPhysicalMaterial';
+                if (!isPBR) { skipped++; continue; }
+                if (skip && m.name && skip.test(m.name)) { skipped++; continue; }
+                if (dry) { enhanced++; continue; }
+                if (m.envMapIntensity == null) m.envMapIntensity = 1.0;
+                if (m.envMapIntensity < 2.0) m.envMapIntensity *= mul;
+                if (m.isMeshPhysicalMaterial && (m.metalness || 0) > 0.5 && (m.clearcoat || 0) < 0.3) {
+                    m.clearcoat = 0.3;
+                    m.clearcoatRoughness = Math.min(0.4, (m.roughness || 0.5) + 0.1);
+                }
+                enhanced++;
+            }
+        });
+        console.log('[Renderer.enhancePBR]', { total, enhanced, skipped, mul, dry });
+        return { total, enhanced, skipped };
+    }
 }

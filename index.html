@@ -223,6 +223,7 @@
         <div class="help-row"><span>暂停</span><kbd>Esc</kbd></div>
         <div class="help-row"><span>本面板</span><kbd>?</kbd></div>
         <div class="help-row"><span>Avatar 自定义</span><kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">U</kbd></div>
+        <div class="help-row"><span>画质档位</span><kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">F4</kbd></div>
         <div style="text-align:center;margin-top:12px;font-size:11px;color:#5a6a7a;">再次按 <kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">?</kbd> 或 <kbd style="background:rgba(255,215,0,.12);border:1px solid rgba(255,215,0,.3);padding:1px 6px;border-radius:4px;color:#ffd700;">Esc</kbd> 关闭</div>
     </div>
     <!-- v6.1.5: 静态 WebGL 不支持大提示（默认隐藏，JS 检测到 WebGL 失败时显示） -->
@@ -291,11 +292,15 @@
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+    // v6.12 (M3.2): 自研 FilmShader（Vignette + Grain + 轻量 FXAA）
+    import { FilmShader } from './src/core/FilmShader.js';
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
     // v6.10.1: 抽离 Renderer 模块
     import { Renderer as RendererModule } from './src/core/Renderer.js';
+    window.RendererModule = RendererModule;
     // v6.10.6: 渲染后端抽象层
     import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js';
     // v6.10.2: 抽离 Input 模块
@@ -475,10 +480,36 @@
     let apiKey='', chatLoading=false, currentChatNpc=null;
     const SAVE_KEY='xyc_v6_final_save';
     let currentMission=null;
-    let shadowQuality=4096;   // PC 默认 4096（边缘清晰的关键）
+    let shadowQuality=2048;   // v6.12 (M3.1): PC 默认 2048（4K 太卡，2K 平衡）
     let fpsTimer=0, fpsCount=0, currentFps=60;
     let isMobile = /Mobi|Android/i.test(navigator.userAgent);
-    if (isMobile) shadowQuality = 2048;
+    if (isMobile) shadowQuality = 1024;
+    // v6.12 (M3.1): 画质档位 0=low 1=med 2=high 3=ultra
+    // 决定 bloom 强度 / SSAO 半径 / 阴影大小 / pixel ratio
+    let qualityPreset = (isMobile ? 1 : 2);  // 移动=med, 桌面=high
+    // 用户可手动改（通过 ? 帮派面板或快捷键 F4）
+    const QUALITY_PRESETS = {
+        0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.4, ssao: false,  ssaoRadius: 0.0, post: false },
+        1: { name: '均衡', pixelRatioCap: 1.25, shadow: 1024, bloomStrength: 0.7, ssao: true,  ssaoRadius: 0.3, post: true },
+        2: { name: '高质', pixelRatioCap: 1.5,  shadow: 2048, bloomStrength: 0.95, ssao: true, ssaoRadius: 0.6, post: true },
+        3: { name: '极致', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 1.2, ssao: true, ssaoRadius: 0.8, post: true }
+    };
+    function applyQualityPreset(p) {
+        const cfg = QUALITY_PRESETS[p] || QUALITY_PRESETS[2];
+        // 阴影
+        shadowQuality = cfg.shadow;
+        if (window.sun && window.sun.shadow) {
+            window.sun.shadow.mapSize.set(cfg.shadow, cfg.shadow);
+            if (window.sun.shadow.map) { window.sun.shadow.map.dispose(); window.sun.shadow.map = null; }
+        }
+        // pixel ratio
+        if (window.renderer) {
+            window.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cfg.pixelRatioCap));
+        }
+        // 重新构造 composer
+        try { rebuildPostPipeline(cfg); } catch (e) { console.warn('[quality] rebuild post failed', e); }
+        console.log('[quality] preset =', p, cfg.name, 'shadow=', cfg.shadow, 'bloom=', cfg.bloomStrength);
+    }
 
     // ---- 知识库 ----
     const KB = [
@@ -3236,6 +3267,15 @@
             if (k === 'u' && window.__avatarPanel) {
                 window.__avatarPanel.toggle();
             }
+            // v6.12 (M3.1): F4 循环切画质档位（流畅→均衡→高质→极致）
+            if (e.key === 'F4') {
+                e.preventDefault();
+                const next = (qualityPreset + 1) % 4;
+                applyQualityPreset(next);
+                qualityPreset = next;
+                const pname = QUALITY_PRESETS[next].name;
+                if (typeof showNotif === 'function') showNotif('🎨 画质：' + pname);
+            }
             // v6.11.0: 动画演示快捷键
             if (k === 'j' && window.__game && window.__game.player && window.__game.player.playAction) {
                 // 跳跃（需玩家在空中才有效，但 mixer 会播完整 jump 动画）
@@ -3437,15 +3477,28 @@
             currentFps = Math.round(fpsCount/fpsTimer);
             fpsCount=0; fpsTimer=0;
             document.getElementById('fpsDisp').textContent = currentFps+' FPS';
+            // v6.12 (M3.5): 性能自适应（兼顾 shadow + pixelRatio + 后处理）
             if(currentFps<30 && shadowQuality>1024){
                 shadowQuality = 1024;
                 sun.shadow.mapSize.set(1024,1024);
                 if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
                 showNotif('画质自适应：阴影降至1K');
-            } else if(currentFps>=50 && shadowQuality<2048){
+            } else if(currentFps<40 && shadowQuality>2048){
+                // v6.12: 4096 → 2048 降级（M3.1 默认已经是 2048）
                 shadowQuality = 2048;
                 sun.shadow.mapSize.set(2048,2048);
                 if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
+                showNotif('画质自适应：阴影降至2K');
+            }
+            // v6.12 (M3.5): pixel ratio 自适应
+            if (renderer) {
+                const cur = renderer.getPixelRatio();
+                if (currentFps < 25 && cur > 1.0) {
+                    renderer.setPixelRatio(1.0);
+                    showNotif('画质自适应：分辨率降至 1×');
+                } else if (currentFps >= 55 && cur < 1.5 && window.devicePixelRatio > 1.5) {
+                    renderer.setPixelRatio(1.5);
+                }
             }
         }
     }
@@ -3485,6 +3538,10 @@
         renderer.shadowMap.enabled = true;
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         renderer.shadowMap.autoUpdate = true;
+        // v6.12 (M3.1): 阴影 bias 防 acne，normalBias 让曲面平滑
+        renderer.shadowMap.bias = -0.0005;
+        renderer.shadowMap.normalBias = 0.02;
+        renderer.shadowMap.radius = 4;
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.15;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -3682,38 +3739,7 @@
         // 会导致整个画面变成纯黑（典型表现：UI 正常但 WebGL canvas 全黑）
         if(!isMobile){
             try {
-                composer = new EffectComposer(renderer);
-                const renderPass = new RenderPass(scene, camera);
-                composer.addPass(renderPass);
-
-                // SSAO 屏幕空间环境光遮蔽 — 让角落/接缝变深（Unity 真实感关键）
-                try {
-                    ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
-                    ssaoPass.kernelRadius = 0.6;
-                    ssaoPass.minDistance = 0.001;
-                    ssaoPass.maxDistance = 0.05;
-                    ssaoPass.output = SSAOPass.OUTPUT.Default;
-                    composer.addPass(ssaoPass);
-                    window._ssao = ssaoPass;
-                } catch(e){ console.warn('SSAO failed, skip', e); }
-
-                const bloomPass = new UnrealBloomPass(
-                    new THREE.Vector2(window.innerWidth, window.innerHeight),
-                    0.95, 0.55, 0.78   // strength, radius, threshold — 接近 Neon City 强度
-                );
-                composer.addPass(bloomPass);
-                window._bloom = bloomPass;
-
-                try {
-                    smaaPass = new SMAAPass(
-                        window.innerWidth * renderer.getPixelRatio(),
-                        window.innerHeight * renderer.getPixelRatio()
-                    );
-                    composer.addPass(smaaPass);
-                } catch(e){ console.warn('SMAA failed, skip', e); }
-
-                outputPass = new OutputPass();
-                composer.addPass(outputPass);
+                rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]);
             } catch(e){
                 console.warn('EffectComposer init failed, fallback to direct render', e);
                 composer = null;
@@ -3721,6 +3747,64 @@
         }
 
         clock = new THREE.Clock();
+
+        // v6.12 (M3.1): 重建后处理管线（独立函数，方便 F4 切换画质档位时重建）
+        // 不启用管线 = 直接 renderer.render(scene, camera)
+        function rebuildPostPipeline(cfg) {
+            if (!renderer || isMobile) { composer = null; return; }
+            if (!cfg.post) { composer = null; return; }
+            // 卸旧
+            if (composer) {
+                try { composer.dispose && composer.dispose(); } catch (_) {}
+                composer = null;
+            }
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+
+            // SSAO
+            if (cfg.ssao && cfg.ssaoRadius > 0) {
+                try {
+                    ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
+                    ssaoPass.kernelRadius = cfg.ssaoRadius;
+                    ssaoPass.minDistance = 0.001;
+                    ssaoPass.maxDistance = 0.05;
+                    ssaoPass.output = SSAOPass.OUTPUT.Default;
+                    composer.addPass(ssaoPass);
+                    window._ssao = ssaoPass;
+                } catch (e) { console.warn('SSAO failed, skip', e); }
+            } else { ssaoPass = null; }
+
+            // Bloom
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                cfg.bloomStrength, 0.55, 0.78
+            );
+            composer.addPass(bloomPass);
+            window._bloom = bloomPass;
+
+            // v6.12 (M3.2): Film Pass = 轻量 FXAA + Vignette + Grain（替换 SMAA，多合一）
+            // SMAA 在弱 GPU 上慢，FXAA 几乎免费 + 颗粒 + 暗角增益电影感
+            try {
+                filmPass = new ShaderPass(FilmShader);
+                filmPass.uniforms.uResolution.value = new THREE.Vector2(
+                    window.innerWidth * renderer.getPixelRatio(),
+                    window.innerHeight * renderer.getPixelRatio()
+                );
+                // 高质档位开 grain + vignette，流畅档位关闭
+                const filmOn = (qualityPreset >= 1);
+                filmPass.uniforms.uVignette.value = filmOn ? 0.45 : 0.0;
+                filmPass.uniforms.uGrain.value    = filmOn ? 0.06 : 0.0;
+                filmPass.uniforms.uFxaa.value     = 1.0;
+                composer.addPass(filmPass);
+                window._film = filmPass;
+            } catch (e) { console.warn('FilmPass failed, skip', e); }
+
+            // OutputPass：sRGB + ToneMapping（自动从 renderer 抓）
+            outputPass = new OutputPass();
+            composer.addPass(outputPass);
+            window._composer = composer;
+        }
 
         // v6.10.1: 加挂 Renderer 模块 - 状态容器
         if (window.__game && window.__game.renderer) {
@@ -4119,6 +4203,11 @@
         }
         updateCamera();
 
+        // v6.12 (M3.2): 推进 Film Shader 的 uTime（让 grain 动起来）
+        if (filmPass && filmPass.uniforms && filmPass.uniforms.uTime) {
+            filmPass.uniforms.uTime.value = (clock ? clock.elapsedTime : performance.now() / 1000);
+        }
+
         if(composer) composer.render();
         else renderer.render(scene, camera);
 
@@ -4215,6 +4304,10 @@
             if(lt) lt.textContent = '构建城市...';
             showProgress('构建城市...', 50);
             buildWorld();
+            // v6.12 (M3.4): PBR 批量增强（envMapIntensity 1.2× + 车漆 clearcoat）
+            if (window.RendererModule && window.RendererModule.enhancePBR) {
+                window.RendererModule.enhancePBR(scene, { envMapIntensityMul: 1.2 });
+            }
             if(lt) lt.textContent = '启动游戏...';
             showProgress('启动游戏...', 90);
             // v6.1.2: 不再 await GLB（避免卡死）

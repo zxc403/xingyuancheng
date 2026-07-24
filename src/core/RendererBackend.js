@@ -65,9 +65,15 @@ export class RendererBackend {
             console.warn('[RendererBackend] WebGPU 探测失败', e);
         }
 
-        // 决定主后端
-        if (this.capabilities.webgpu) {
+        // 决定主后端：v6.12 (M3.3) 默认走 WebGL2（WebGPU 仍是 alpha，需 ?webgpu=1 显式开）
+        const explicitWebGPU = (typeof location !== 'undefined' &&
+            /[?&]webgpu=1\b/.test(location.search));
+        if (this.capabilities.webgpu && explicitWebGPU) {
             this.current = Backend.WEBGPU;
+        } else if (this.capabilities.webgpu) {
+            // 有能力但不显式开启 → 默认 WebGL2（避免 r160 alpha 期黑屏）
+            this.current = Backend.WEBGL2;
+            this._webgpuAvailable = true;
         } else if (this.capabilities.webgl2) {
             this.current = Backend.WEBGL2;
         } else {
@@ -80,22 +86,41 @@ export class RendererBackend {
     }
 
     /**
-     * 创建 renderer（v6.10.6 阶段只返回 WebGLRenderer，v6.11 切换 WebGPU）
-     * @param {Object} opts - 同 THREE.WebGLRenderer 参数
-     * @returns {THREE.WebGLRenderer | null}
+     * v6.12 (M3.3): 创建 renderer — 优先 WebGPU，降级 WebGL2
+     * WebGPU 在 r160 是独立子模块 three/addons/renderers/webgpu/WebGPURenderer.js
+     * 需要 dynamic import 拿到（同步 import 会拖累首屏）
+     * @param {Object} opts
+     * @returns {Promise<THREE.WebGLRenderer | null>}
      */
-    createRenderer(opts = {}) {
+    async createRenderer(opts = {}) {
         if (this.current === Backend.WEBGPU) {
-            // TODO v6.11: 接入 WebGPURenderer
-            console.warn('[RendererBackend] WebGPU 模式在 v6.10.6 阶段尚未实现，v6.11 切换');
+            try {
+                const mod = await import('three/addons/renderers/webgpu/WebGPURenderer.js');
+                const WGPU = mod.WebGPURenderer || (mod.default && mod.default.WebGPURenderer);
+                if (WGPU) {
+                    console.log('[RendererBackend] 使用 WebGPURenderer');
+                    // WebGPU 在 r160 是 alpha：forceWebGL=false 让它回退 WebGL2 路径如果不支持
+                    return new WGPU({ ...opts, forceWebGL: false });
+                }
+                console.warn('[RendererBackend] WebGPURenderer 模块未找到，降级 WebGL2');
+            } catch (e) {
+                console.warn('[RendererBackend] WebGPU 加载失败，降级 WebGL2', e);
+            }
         }
-        // v6.10.6 阶段：WebGL2 优先
         try {
             return new THREE.WebGLRenderer(opts);
         } catch (e) {
             console.error('[RendererBackend] WebGLRenderer 创建失败', e);
             return null;
         }
+    }
+
+    /**
+     * v6.12 (M3.3): 同步版 createRenderer（兼容老调用，v6.13 改 async）
+     * @deprecated 用 await createRenderer(opts)
+     */
+    createRendererSync(opts = {}) {
+        return new THREE.WebGLRenderer(opts);
     }
 
     /**

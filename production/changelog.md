@@ -1,5 +1,42 @@
 # Changelog
 
+## v6.12 — 画质再升级：r166 兼容 + 4 档画质 + Film Pass + PBR 拉满（commit 6 of 6，M3 全套）
+- ✅ **M3.1 升级 r160 → r166 兼容层**
+  - `OutputPass` 已在 r160 就位（之前 v6.10.6 已引），无需改 main path
+  - 补 `shadowMap.bias = -0.0005` + `normalBias = 0.02` + `radius = 4`（防 acne + 曲面平滑）
+- ✅ **M3.1 4 档画质预设（流畅/均衡/高质/极致）**
+  - `QUALITY_PRESETS` 枚举：pixelRatio 1.0-2.0、阴影 512-2048、bloom 0.4-1.2、SSAO 开/关
+  - `applyQualityPreset(p)` 实时切换（重建 composer + 改 shadow mapSize + 改 pixelRatio）
+  - **F4 快捷键** 循环切档（流畅→均衡→高质→极致），showNotif 显示当前档名
+  - 移动端默认 均衡档（qualityPreset=1），桌面默认 高质档（qualityPreset=2）
+  - help 面板新增 F4 提示
+- ✅ **M3.2 Film Pass 多合一后处理**
+  - `src/core/FilmShader.js` 自研 GLSL shader（vignette + grain + 轻量 FXAA）
+  - 替换 SMAA：少 1 个 fullscreen pass，且叠加电影感
+  - FXAA 简化版：luma edge detection + 邻域 blend（无 alpha 噪点）
+  - Vignette：smoothstep(0.85, 0.2, len(uv-0.5))，高质档 0.45 / 流畅档 0.0
+  - Grain：hash 噪声 + uTime，每帧动起来（胶片颗粒感）
+  - 主循环推 `uTime.value = clock.elapsedTime`
+- ✅ **M3.3 WebGPU 后端切换**
+  - `RendererBackend.createRenderer` 改为 async：探测到 WebGPU 时 dynamic import `three/addons/renderers/webgpu/WebGPURenderer.js`
+  - 兼容兜底：WebGPU 加载失败自动降级 WebGL2（不黑屏）
+  - `createRendererSync(opts)` 保留旧接口（标注 deprecated，v6.13 删除）
+  - **默认走 WebGL2**（r160 WebGPU 仍 alpha，需 URL 加 `?webgpu=1` 显式开启）
+  - 探测到 GPU 能力但未显式开 → `_webgpuAvailable = true` 标记，方便后续诊断
+- ✅ **M3.4 PBR 拉满**
+  - `Renderer.enhancePBR(scene, opts)` 静态方法：遍历 scene 所有 MeshStandard/Physical
+  - `envMapIntensity *= 1.2`（除非 ≥ 2.0）让反射更亮
+  - metalness > 0.5 的物体自动加 `clearcoat = 0.3`（车漆质感）
+  - `dryRun` 选项：只统计不修改（适合 debug）
+  - index.html 在 `buildWorld()` 后调一次（生产环境 1 次）
+- ✅ **M3.5 性能收口**
+  - shadow dynamic degrade 阈值修正：4096→2048 触发条件 `fps<40`（之前 4096 死路）
+  - pixelRatio dynamic degrade：`fps<25` 降至 1.0，`fps≥55` 升回 1.5（自适应）
+  - shadowQuality 默认 2048（M3.1 调整，4K 太卡）
+- ⏸ Three.js r160 → r166 实跳留到 v6.13（EffectComposer/OutputPass 在 r160 已就位，r166 主要加 WebGPU 完善）
+- ⏸ meshopt decoder 留到 v6.13（GLB 二次压缩，30-50% 体积）
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.11.0 — 角色系统 5：Avatar 自定义 + 角色 IK（commit 5 of 6）
 - ✅ **M2.5**: `src/ui/AvatarPanel.js` 玩家 Avatar 自定义 UI
   - 6 维度调节：角色模型 / 体型 / 身高 / 肤色 / 服装 5 槽 / 玩家名字
