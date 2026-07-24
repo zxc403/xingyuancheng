@@ -46,7 +46,7 @@ export class Renderer {
         this.camera = camera;
         this.renderer = renderer;
         this.composer = composer || null;
-        this.clock = clock || new (window.THREE || {}).Clock?.() || { getDelta: ()=>1/60 };
+        this.clock = clock || (window.THREE ? new window.THREE.Clock() : { getDelta: ()=>1/60 });
         this.isMobile = !!isMobile;
         this.pixelRatio = renderer.getPixelRatio();
 
