@@ -968,7 +968,10 @@
         } catch(e) {
             if(!window._modelErrors) window._modelErrors = [];
             var msg = (e && e.message) || String(e);
-            window._modelErrors.push({ key: 'LOAD_REAL_FATAL', err: msg.substring(0,80), url: '' });
+            // v6.11.6: 提取属性名（"Cannot read properties of X (reading 'Y')" -> Y）
+            var m = msg.match(/reading ['"]([^'"]+)['"]/);
+            var prop = m ? m[1] : '';
+            window._modelErrors.unshift({ key: 'LOAD_REAL_FATAL', err: msg + (prop?' (prop='+prop+')':''), url: '' });
             throw e;
         }
     }
@@ -4691,9 +4694,9 @@
         ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
         if(w._modelErrors && w._modelErrors.length) {
-            var es = w._modelErrors.slice(0, 4);
+            var es = w._modelErrors.slice(0, 2);
             for(var i=0;i<es.length;i++){
-                lines.push('M' + i + ': ' + es[i].key + ' ' + es[i].err.substring(0,30));
+                lines.push('M' + i + ': ' + es[i].key + ': ' + es[i].err.substring(0,70));
             }
         }
         if(w._wbExtra) lines.push(w._wbExtra);
