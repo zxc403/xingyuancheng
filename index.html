@@ -318,6 +318,10 @@
         pickClip as pickAnimClip,
         dumpRegistry as dumpCharRegistry
     } from './src/entities/CharacterRegistry.js';
+    // v6.11.0: 动画状态机（NPC 子模块通过 window 访问）
+    import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js';
+    window.AnimationStateMachine = AnimationStateMachine;
+    window.AnimState = AnimState;
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
@@ -3179,6 +3183,25 @@
             }
             if(e.key==='?'||e.key==='/'||k==='?'){
                 document.getElementById('helpPanel').classList.toggle('show');
+            }
+            // v6.11.0: 动画演示快捷键
+            if (k === 'j' && window.__game && window.__game.player && window.__game.player.playAction) {
+                // 跳跃（需玩家在空中才有效，但 mixer 会播完整 jump 动画）
+                if (window.__game.player.playAction('jump')) {
+                    showNotif('🦘 Jump');
+                }
+            }
+            if (k === 'b' && window.__game && window.__game.player && window.__game.player.playAction) {
+                // 挥手 / 打招呼
+                if (window.__game.player.playAction('wave')) {
+                    showNotif('👋 Wave');
+                }
+            }
+            if (k === 'g' && window.__game && window.__game.player && window.__game.player.playAction) {
+                // 手势（thumbsup / yes / no）
+                if (window.__game.player.playAction('gesture')) {
+                    showNotif('👍 Gesture');
+                }
             }
         });
     }

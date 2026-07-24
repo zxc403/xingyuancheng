@@ -1,5 +1,6 @@
 // src/entities/Player.js
 // v6.10.3: 抽离 Player 实体 - 玩家模型/动画状态机/逻辑入口
+// v6.11.0: 升级为完整 blend tree（AnimationStateMachine）
 //
 // 设计思路：Player 类封装所有"玩家相关"逻辑。
 // index.html 中的 updatePlayer 是个大函数（300+ 行），本类只接管
@@ -8,10 +9,31 @@
 //
 // 接口：
 //   player.spawn(scene)         - 创建玩家 GLB 身体
-//   player.updateAnim(dt)       - 动画状态机（idle/walk/run）
+//   player.updateAnim(dt, input) - blend tree 状态机（idle/walk/jog/run/crouch/jump）
 //   player.getMesh()            - 拿到 mesh（给相机/AI 用）
+//   player.playAction(state)    - 触发一次性动作（jump/wave/dance/death）
 
 const THREE = window.THREE;  // 复用 index.html 已 import 的 THREE
+import { AnimationStateMachine, AnimState } from './AnimationStateMachine.js';  // v6.11.0
+
+// v6.11.0: clip 关键词映射（来自 CharacterRegistry）
+const INTENT_KEYWORDS = {
+    [AnimState.IDLE]:    ['idle', 'breath'],
+    [AnimState.WALK]:    ['walk', 'walking'],
+    [AnimState.JOG]:     ['jog', 'run', 'sprint'],
+    [AnimState.RUN]:     ['run', 'sprint', 'jog'],
+    [AnimState.CROUCH_IDLE]:  ['crouch', 'sitting'],
+    [AnimState.CROUCH_WALK]:  ['crouchwalk', 'crouch_walk', 'sneak'],
+    [AnimState.JUMP_START]:   ['jump', 'leap'],
+    [AnimState.FALLING]:      ['fall', 'falling'],
+    [AnimState.LANDING]:      ['land', 'landing'],
+    [AnimState.DEATH]:        ['death', 'die'],
+    [AnimState.DANCE]:        ['dance'],
+    [AnimState.TALK]:         ['talk', 'wave', 'yes'],
+    [AnimState.WAVE]:         ['wave', 'hello'],
+    [AnimState.PUNCH]:        ['punch', 'hit'],
+    [AnimState.GESTURE]:      ['gesture', 'thumbs', 'yes', 'no', 'wave']
+};
 
 export class Player {
     constructor() {
@@ -35,6 +57,7 @@ export class Player {
         this.mesh = null;
         this.mixer = null;
         this.acts = null;  // { idle, walk, run, currentAct }
+        this.sm = null;    // v6.11.0: AnimationStateMachine
 
         // 染色
         this.tint = 0x4488ff;  // 玩家衣服颜色（默认蓝）
@@ -87,20 +110,44 @@ export class Player {
                 }
             });
 
-            // 动画 mixer
+            // 动画 mixer（v6.11.0: 完整 blend tree 注册）
             const src = window._realModelsSrc && window._realModelsSrc[key];
             if (src && src.animations && src.animations.length) {
                 this.mixer = new THREE.AnimationMixer(charG);
                 const findAnim = (kw) =>
                     src.animations.find(a => a.name && a.name.toLowerCase().includes(kw));
-                const idle = findAnim('idle') || findAnim('breath') || src.animations[0];
-                const walk = findAnim('walk') || findAnim('walking') || idle;
-                const run  = findAnim('run')  || findAnim('jog')   || walk;
-                const aI = this.mixer.clipAction(idle); aI.setLoop(THREE.LoopRepeat, Infinity);
-                const aW = this.mixer.clipAction(walk); aW.setLoop(THREE.LoopRepeat, Infinity);
-                const aR = this.mixer.clipAction(run);  aR.setLoop(THREE.LoopRepeat, Infinity);
-                aI.play();
-                this.acts = { idle: aI, walk: aW, run: aR, currentAct: aI };
+                // 找所有 intent 对应的 clip
+                const find = (kws) => {
+                    for (const kw of kws) {
+                        const a = findAnim(kw);
+                        if (a) return a;
+                    }
+                    return null;
+                };
+                const acts = {};
+                for (const [intent, kws] of Object.entries(INTENT_KEYWORDS)) {
+                    const clip = find(kws);
+                    if (clip) {
+                        const a = this.mixer.clipAction(clip);
+                        a.setLoop(THREE.LoopRepeat, Infinity);
+                        acts[intent] = a;
+                    }
+                }
+                // 兜底：idle 必填
+                if (!acts.idle) {
+                    const fallback = src.animations[0];
+                    const a = this.mixer.clipAction(fallback);
+                    a.setLoop(THREE.LoopRepeat, Infinity);
+                    a.play();
+                    acts.idle = a;
+                } else {
+                    acts.idle.play();
+                }
+                this.acts = acts;
+                // v6.11.0: 实例化状态机
+                this.sm = new AnimationStateMachine(this.acts, this.mixer);
+                console.log('[Player.spawn] 动画注册完成，clips=',
+                    Object.keys(this.acts).length, Object.keys(this.acts).join(','));
             }
 
             this.mesh = charG;
@@ -139,24 +186,35 @@ export class Player {
     }
 
     /**
-     * 动画状态机（idle / walk / run）
+     * 动画状态机（v6.11.0: 完整 blend tree）
      * @param {number} dt
+     * @param {object} input   { speed, verticalVel, onGround, crouching }
      */
-    updateAnim(dt) {
-        if (!this.mixer || !this.acts) return;
-        this.mixer.update(dt);
-        const spd = this.moveSpeed || 0;
-        let target = this.acts.idle;
-        if (spd > 6.0) target = this.acts.run;
-        else if (spd > 0.4) target = this.acts.walk;
-        if (target && this.acts.currentAct !== target) {
-            target.reset();
-            target.setLoop(THREE.LoopRepeat, Infinity);
-            target.fadeIn(0.2);
-            target.play();
-            if (this.acts.currentAct) this.acts.currentAct.fadeOut(0.2);
-            this.acts.currentAct = target;
+    updateAnim(dt, input = {}) {
+        if (!this.mixer) return;
+        if (this.sm) {
+            // v6.11.0: 走完整状态机
+            this.sm.update(dt, {
+                speed: input.speed != null ? input.speed : (this.moveSpeed || 0),
+                verticalVel: input.verticalVel || 0,
+                onGround: input.onGround !== false,
+                crouching: !!input.crouching,
+                dying: !!input.dying
+            });
+        } else if (this.acts) {
+            // v6.6 兜底：直接 mixer.update
+            this.mixer.update(dt);
         }
+    }
+
+    /**
+     * 触发一次性动作（jump / dance / wave / death）
+     * @param {string} stateName   AnimState 枚举值
+     * @returns {boolean} 成功
+     */
+    playAction(stateName) {
+        if (!this.sm) return false;
+        return this.sm.playOnce(stateName);
     }
 
     /**

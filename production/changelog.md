@@ -1,5 +1,32 @@
 # Changelog
 
+## v6.11.0 — 角色系统 2：完整 blend tree（commit 2 of 6）
+- ✅ **M2.3**: `src/entities/AnimationStateMachine.js` 完整动画状态机
+  - 16 个 AnimState 枚举：idle/walk/jog/run/crouch_idle/crouch_walk/jump/falling/landing/death/dance/talk/wave/punch/gesture/custom
+  - 4 段速度阈值：IDLE<0.1 / WALK<1.5 / JOG<3.5 / RUN+
+  - 4 种状态：主循环（speed-based）/ 空中（verticalVel-based）/ 一次性（jump/dance/...）/ 死亡
+  - 平滑过渡：fadeIn/fadeOut 0.20s 跨状态切换
+  - 智能降级：run 缺时自动用 jog → walk → idle
+  - `pickAct(state)` 状态→action 映射 + 降级
+  - `_computeState(input)` 状态计算
+  - `playOnce(state)` 一次性动作（jump/dance 播完自动回 idle）
+- ✅ **Player.js 升级**
+  - `INTENT_KEYWORDS` 15 intent → 关键词数组映射
+  - spawn 时遍历 INTENT_KEYWORDS 注册所有可能的 clip
+  - `updateAnim(dt, input)` 走 SM（新参数：speed/verticalVel/onGround/crouching/dying）
+  - `playAction(stateName)` 暴露给 index.html 触发一次性动作
+- ✅ **NPC.js 升级**
+  - 同样走 INTENT_KEYWORDS 逻辑
+  - `updateAnim` 走 SM
+  - 缺 SM 时降级回 v6.6 三态硬切逻辑
+- ✅ **index.html 集成**
+  - 暴露 `window.AnimationStateMachine` / `window.AnimState`
+  - 加快捷键 `J` (jump) / `B` (wave) / `G` (gesture) 演示一次性动作
+- ⏸ **M2.4 morph target** - 待做
+- ⏸ **M2.5 Avatar 自定义** - 待做
+- ⏸ **M2.6 角色 IK** - 待做
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.11.0 — 角色系统 1：注册表 + 18 角色（commit 1 of 6）
 - ✅ **M2.1**: 下载 11 套 CC0/MIT 角色模型
   - RobotExpressive.glb (464KB, 13 clips, MIT)

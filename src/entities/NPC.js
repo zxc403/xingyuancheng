@@ -101,22 +101,48 @@ export class NPC {
                 g.add(charG);
                 npc.charGroup = charG;
 
-                // 动画 mixer
+                // 动画 mixer（v6.11.0: 完整 blend tree 注册）
                 const src = window._realModelsSrc && window._realModelsSrc[glbKey];
                 if (src && src.animations && src.animations.length) {
                     try {
                         const mixer = new THREE.AnimationMixer(charG);
                         const findAnim = (kw) =>
                             src.animations.find(a => a.name && a.name.toLowerCase().includes(kw));
-                        const idle = findAnim('idle') || findAnim('breath') || src.animations[0];
-                        const walk = findAnim('walk') || findAnim('walking') || idle;
-                        const run  = findAnim('run')  || findAnim('jog')   || walk;
-                        const aI = mixer.clipAction(idle); aI.setLoop(THREE.LoopRepeat, Infinity);
-                        const aW = mixer.clipAction(walk); aW.setLoop(THREE.LoopRepeat, Infinity);
-                        const aR = mixer.clipAction(run);  aR.setLoop(THREE.LoopRepeat, Infinity);
-                        aI.play();
+                        // v6.11.0: 复用 Player 的 INTENT_KEYWORDS 逻辑
+                        const KWS = {
+                            idle:['idle','breath'], walk:['walk','walking'], jog:['jog','run','sprint'],
+                            run:['run','sprint','jog'], crouch_idle:['crouch','sitting'],
+                            crouch_walk:['crouchwalk','crouch_walk','sneak'],
+                            jump:['jump','leap'], falling:['fall','falling'], landing:['land','landing'],
+                            death:['death','die'], dance:['dance'],
+                            talk:['talk','wave','yes'], wave:['wave','hello'],
+                            punch:['punch','hit'], gesture:['gesture','thumbs','yes','no','wave']
+                        };
+                        const find = (kws) => { for (const kw of kws) { const a = findAnim(kw); if (a) return a; } return null; };
+                        const acts = {};
+                        for (const [intent, kws] of Object.entries(KWS)) {
+                            const clip = find(kws);
+                            if (clip) {
+                                const a = mixer.clipAction(clip);
+                                a.setLoop(THREE.LoopRepeat, Infinity);
+                                acts[intent] = a;
+                            }
+                        }
+                        if (!acts.idle) {
+                            const fb = src.animations[0];
+                            const a = mixer.clipAction(fb);
+                            a.setLoop(THREE.LoopRepeat, Infinity);
+                            a.play();
+                            acts.idle = a;
+                        } else {
+                            acts.idle.play();
+                        }
                         npc.mixer = mixer;
-                        npc.acts = { idle: aI, walk: aW, run: aR, currentAct: aI };
+                        npc.acts = acts;
+                        // v6.11.0: 实例化 SM
+                        if (window.AnimationStateMachine) {
+                            npc.sm = new window.AnimationStateMachine(acts, mixer);
+                        }
                     } catch (e) { /* ignore anim error */ }
                 }
             } catch (e) {
@@ -157,19 +183,30 @@ export class NPC {
      * 动画状态机（按 moveSpeed 切 idle/walk/run）
      */
     updateAnim(dt) {
-        if (!this.mixer || !this.acts) return;
-        this.mixer.update(dt);
-        const spd = Math.sqrt(this.vel.x * this.vel.x + this.vel.z * this.vel.z);
-        let target = this.acts.idle;
-        if (spd > 6.0) target = this.acts.run;
-        else if (spd > 0.4) target = this.acts.walk;
-        if (target && this.acts.currentAct !== target) {
-            target.reset();
-            target.setLoop(THREE.LoopRepeat, Infinity);
-            target.fadeIn(0.2);
-            target.play();
-            if (this.acts.currentAct) this.acts.currentAct.fadeOut(0.2);
-            this.acts.currentAct = target;
+        if (!this.mixer) return;
+        if (this.sm) {
+            // v6.11.0: 走完整状态机
+            const spd = Math.sqrt(this.vel.x * this.vel.x + this.vel.z * this.vel.z);
+            this.sm.update(dt, {
+                speed: spd,
+                onGround: this.onGround !== false,
+                dying: this.health <= 0
+            });
+        } else if (this.acts) {
+            // v6.6 兜底
+            this.mixer.update(dt);
+            const spd = Math.sqrt(this.vel.x * this.vel.x + this.vel.z * this.vel.z);
+            let target = this.acts.idle;
+            if (spd > 6.0) target = this.acts.run;
+            else if (spd > 0.4) target = this.acts.walk;
+            if (target && this.acts.currentAct !== target) {
+                target.reset();
+                target.setLoop(THREE.LoopRepeat, Infinity);
+                target.fadeIn(0.2);
+                target.play();
+                if (this.acts.currentAct) this.acts.currentAct.fadeOut(0.2);
+                this.acts.currentAct = target;
+            }
         }
     }
 
