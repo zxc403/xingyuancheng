@@ -375,21 +375,21 @@
     // v6.1.5: GLTFLoader 改为动态 import（缺失时不抛错，静默降级）
     let GLTFLoader = null;
     let GLTFLoaderPromise = null;
-    // 用相对路径预检 GLTFLoader 是否存在（加 ?v=3 缓存破坏，避免移动浏览器缓存 404）
-    GLTFLoaderPromise = fetch('vendor/three/addons/loaders/GLTFLoader.js?v=3', {method:'HEAD'}).then(function(r){
+    // 用 ./vendor/... 相对路径（带 ?v=3 缓存破坏），不走 import map（因为 import map 不支持在映射前缀外加 query string）
+    GLTFLoaderPromise = fetch('./vendor/three/addons/loaders/GLTFLoader.js?v=3', {method:'HEAD'}).then(function(r){
         if(r.ok){
-            return import('vendor/three/addons/loaders/GLTFLoader.js?v=3');
+            return import('./vendor/three/addons/loaders/GLTFLoader.js?v=3');
         }
     }).then(function(m){ if(m) GLTFLoader = m.GLTFLoader; }).catch(function(){});
 
     // v6.11.2 (WB): 补齐 DRACO + KTX2 解码器，支持压缩模型（LittlestTokyo 用 Draco，部分 PBR 用 KTX2）
     let DRACOLoader = null, KTX2Loader = null;
     let DRACOLoaderPromise = null, KTX2LoaderPromise = null;
-    DRACOLoaderPromise = fetch('vendor/three/addons/loaders/DRACOLoader.js?v=3', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('vendor/three/addons/loaders/DRACOLoader.js?v=3'); }
+    DRACOLoaderPromise = fetch('./vendor/three/addons/loaders/DRACOLoader.js?v=3', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('./vendor/three/addons/loaders/DRACOLoader.js?v=3'); }
     }).then(function(m){ if(m) DRACOLoader = m.DRACOLoader; }).catch(function(){});
-    KTX2LoaderPromise = fetch('vendor/three/addons/loaders/KTX2Loader.js?v=3', {method:'HEAD'}).then(function(r){
-        if(r.ok){ return import('vendor/three/addons/loaders/KTX2Loader.js?v=3'); }
+    KTX2LoaderPromise = fetch('./vendor/three/addons/loaders/KTX2Loader.js?v=3', {method:'HEAD'}).then(function(r){
+        if(r.ok){ return import('./vendor/three/addons/loaders/KTX2Loader.js?v=3'); }
     }).then(function(m){ if(m) KTX2Loader = m.KTX2Loader; }).catch(function(){});
 
     // ---- 工具 ----
