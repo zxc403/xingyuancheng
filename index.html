@@ -1109,6 +1109,8 @@
             this.master.gain.value = 0.3;
             this.master.connect(this.ctx.destination);
             this.stepCooldown = 0;  // v6.4: 脚步间间隔
+            // v6.13: 程序化氛围音（海浪/风/雨 + 雷声，移植自潮汐 X3，零素材）
+            try { this.initAmbience(); this.startAmbience(); } catch(e) { console.warn('[AudioSys] ambience', e); }
         },
         playBeep(freq, dur, vol) {
             try {
@@ -1140,6 +1142,92 @@
             this.playBeep(f, 0.06, 0.05);
         },
         updateStepCooldown(dt) { if (this.stepCooldown > 0) this.stepCooldown -= dt; },
+        // ===== v6.13 程序化氛围音（移植自潮汐 X3，全合成，零素材文件）=====
+        initAmbience() {
+            const sr = this.ctx.sampleRate;
+            const buf = this.ctx.createBuffer(1, sr * 2, sr);
+            const d = buf.getChannelData(0); let last = 0;
+            for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; last = (last + 0.02 * w) / 1.02; d[i] = last * 3.2; }
+            this.noiseBuf = buf;
+            this.ambBus = this.ctx.createGain(); this.ambBus.gain.value = 0; this.ambBus.connect(this.master);
+            // 海浪：低通噪声循环
+            const s1 = this.ctx.createBufferSource(); s1.buffer = buf; s1.loop = true;
+            const f1 = this.ctx.createBiquadFilter(); f1.type = 'lowpass'; f1.frequency.value = 360;
+            const g1 = this.ctx.createGain(); g1.gain.value = 0.0;
+            s1.connect(f1); f1.connect(g1); g1.connect(this.ambBus); s1.start();
+            this.oceanGain = g1;
+            // 风：带通噪声
+            const s2 = this.ctx.createBufferSource(); s2.buffer = buf; s2.loop = true;
+            const f2 = this.ctx.createBiquadFilter(); f2.type = 'bandpass'; f2.frequency.value = 500; f2.Q.value = 0.5;
+            const g2 = this.ctx.createGain(); g2.gain.value = 0.0;
+            s2.connect(f2); f2.connect(g2); g2.connect(this.ambBus); s2.start();
+            this.windGain = g2;
+            // 雨：高通噪声
+            const s3 = this.ctx.createBufferSource(); s3.buffer = buf; s3.loop = true;
+            const f3 = this.ctx.createBiquadFilter(); f3.type = 'highpass'; f3.frequency.value = 1400;
+            const g3 = this.ctx.createGain(); g3.gain.value = 0.0;
+            s3.connect(f3); f3.connect(g3); g3.connect(this.ambBus); s3.start();
+            this.rainGain = g3;
+            this.ambOn = false;
+            setInterval(() => this._ambSchedule(), 4000);
+        },
+        startAmbience() {
+            if (!this.ctx) return;
+            if (this.ctx.state === 'suspended') {
+                const resume = () => { this.ctx.resume(); this._ambResume(); window.removeEventListener('pointerdown', resume); window.removeEventListener('keydown', resume); };
+                window.addEventListener('pointerdown', resume); window.addEventListener('keydown', resume);
+                return;
+            }
+            this._ambResume();
+        },
+        _ambResume() {
+            if (this.ambBus) this.ambBus.gain.setTargetAtTime(0.28, this.ctx.currentTime, 0.8);
+            this.ambOn = true;
+            const w = (typeof gameWeather !== 'undefined') ? Math.floor(gameWeather) : 0;
+            this.setWeatherAudio(w);
+        },
+        setWeatherAudio(w) {
+            if (!this.ctx || !this.windGain) return;
+            const t = this.ctx.currentTime;
+            const wind = [0.015, 0.05, 0.02, 0.07, 0.04][w] || 0.02;
+            const rain = [0, 0, 0, 0.09, 0.02][w] || 0;
+            this.windGain.gain.setTargetAtTime(wind, t, 0.8);
+            this.rainGain.gain.setTargetAtTime(rain, t, 0.8);
+            this.oceanGain.gain.setTargetAtTime(0.06 + wind * 0.3, t, 0.8);
+        },
+        thunder() {
+            if (!this.ctx || !this.ambOn) return;
+            const now = this.ctx.currentTime;
+            const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+            o.type = 'sawtooth'; o.frequency.setValueAtTime(80, now); o.frequency.exponentialRampToValueAtTime(20, now + 0.4);
+            g.gain.setValueAtTime(0.3, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+            o.connect(g); g.connect(this.ambBus); o.start(now); o.stop(now + 0.6);
+            const n = this.ctx.createOscillator(), ng = this.ctx.createGain();
+            n.type = 'sine'; n.frequency.setValueAtTime(35, now); n.frequency.exponentialRampToValueAtTime(8, now + 0.8);
+            ng.gain.setValueAtTime(0.16, now); ng.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+            n.connect(ng); ng.connect(this.ambBus); n.start(now); n.stop(now + 1.0);
+        },
+        birdChirp() {
+            if (!this.ctx || !this.ambOn) return;
+            const t = this.ctx.currentTime;
+            for (let k = 0; k < 3; k++) {
+                const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+                o.type = 'square';
+                o.frequency.setValueAtTime(2200 + Math.random() * 600, t + k * 0.18);
+                o.frequency.exponentialRampToValueAtTime(2800 + Math.random() * 400, t + k * 0.18 + 0.12);
+                g.gain.setValueAtTime(0.0001, t + k * 0.18);
+                g.gain.exponentialRampToValueAtTime(0.03, t + k * 0.18 + 0.03);
+                g.gain.exponentialRampToValueAtTime(0.0001, t + k * 0.18 + 0.12);
+                o.connect(g); g.connect(this.ambBus); o.start(t + k * 0.18); o.stop(t + k * 0.18 + 0.14);
+            }
+        },
+        _ambSchedule() {
+            if (!this.ambOn || !this.ctx) return;
+            const w = (typeof gameWeather !== 'undefined') ? Math.floor(gameWeather) : 0;
+            this.setWeatherAudio(w);
+            if (w === 3 && Math.random() < 0.5) this.thunder();   // 小雨随机雷
+            if (w < 3 && Math.random() < 0.4) this.birdChirp();   // 白天鸟鸣
+        },
         startEngine() { /* 简化 */ },
         setEngineRPM(r) { /* 简化 */ },
         stopEngine() { /* 简化 */ },
@@ -3796,6 +3884,9 @@
                 filmPass.uniforms.uVignette.value = filmOn ? 0.45 : 0.0;
                 filmPass.uniforms.uGrain.value    = filmOn ? 0.06 : 0.0;
                 filmPass.uniforms.uFxaa.value     = 1.0;
+                // v6.13: 色散 + CAS 锐化（移植自潮汐 X3 海洋后处理）
+                filmPass.uniforms.uChroma.value   = filmOn ? 0.6 : 0.0;
+                filmPass.uniforms.uSharp.value    = filmOn ? 0.5 : 0.0;
                 composer.addPass(filmPass);
                 window._film = filmPass;
             } catch (e) { console.warn('FilmPass failed, skip', e); }

@@ -18,7 +18,9 @@ const FilmShader = {
         'uResolution':{ value: null },   // THREE.Vector2
         'uVignette':  { value: 0.45 },   // 暗角强度 0-1
         'uGrain':     { value: 0.06 },   // 胶片颗粒强度 0-0.3
-        'uFxaa':      { value: 1.0 }     // FXAA 开关 0/1
+        'uFxaa':      { value: 1.0 },    // FXAA 开关 0/1
+        'uChroma':    { value: 0.0 },    // 色散强度 0-1（移植自潮汐 X3）
+        'uSharp':     { value: 0.0 }     // CAS 锐化强度 0-1（移植自潮汐 X3）
     },
 
     vertexShader: /* glsl */`
@@ -68,23 +70,49 @@ const FilmShader = {
         }
 
         void main() {
+            vec2 uv = vUv;
+            vec2 px = 1.0 / uResolution;
             vec3 col;
-            if (uFxaa > 0.5) {
-                col = fxaa(tDiffuse, vUv, uResolution);
+
+            // 色散 Chromatic Aberration（径向偏移，移植自潮汐 X3）
+            if (uChroma > 0.001) {
+                vec2 dir = uv - 0.5;
+                vec2 off = dir * (0.0022 * uChroma);
+                if (uFxaa > 0.5) {
+                    col.r = fxaa(tDiffuse, uv + off, uResolution).r;
+                    col.g = fxaa(tDiffuse, uv,      uResolution).g;
+                    col.b = fxaa(tDiffuse, uv - off, uResolution).b;
+                } else {
+                    col.r = texture2D(tDiffuse, uv + off).r;
+                    col.g = texture2D(tDiffuse, uv).g;
+                    col.b = texture2D(tDiffuse, uv - off).b;
+                }
             } else {
-                col = texture2D(tDiffuse, vUv).rgb;
+                col = (uFxaa > 0.5) ? fxaa(tDiffuse, uv, uResolution) : texture2D(tDiffuse, uv).rgb;
+            }
+
+            // CAS 锐化（简化 FidelityFX，移植自潮汐 X3）
+            if (uSharp > 0.001) {
+                vec3 l = texture2D(tDiffuse, uv - vec2(px.x, 0.0)).rgb;
+                vec3 r = texture2D(tDiffuse, uv + vec2(px.x, 0.0)).rgb;
+                vec3 t = texture2D(tDiffuse, uv + vec2(0.0, px.y)).rgb;
+                vec3 b = texture2D(tDiffuse, uv - vec2(0.0, px.y)).rgb;
+                vec3 mn = min(col, min(min(l, r), min(t, b)));
+                vec3 mx = max(col, max(max(l, r), max(t, b)));
+                vec3 lap = (l + r + t + b) * 0.25 - col;
+                col = clamp(col - lap * uSharp * 1.6, mn, mx * 1.05 + 0.005);
             }
 
             // Vignette 暗角
             if (uVignette > 0.001) {
-                vec2 d = vUv - 0.5;
+                vec2 d = uv - 0.5;
                 float v = smoothstep(0.85, 0.2, length(d));
                 col *= mix(1.0, v, uVignette);
             }
 
             // Film Grain
             if (uGrain > 0.001) {
-                float n = hash(vUv * uResolution + uTime * 60.0);
+                float n = hash(uv * uResolution + uTime * 60.0);
                 col += (n - 0.5) * uGrain;
             }
 
