@@ -4518,27 +4518,23 @@
             ]);
             if (realHDR) scene.environment = realHDR;
             window._realHDR = realHDR;
+            if(lt) lt.textContent = '加载真实模型(GLB)...';
+            showProgress('加载真实模型(GLB)...', 50);
+            // v6.11.2 (WB): 先 await 模型加载，再 buildWorld —— 否则 buildWorld 内的
+            //   if(window._realModels){ placeG(...) } 会在 _realModels 为空时整段跳过，
+            //   导致 391 个 GLB 全部不显示（"下了资源没进展"第二根因）
+            try { await loadRealModels(); } catch(e) { console.warn('[Init] real models failed (non-fatal)', e); }
             if(lt) lt.textContent = '构建城市...';
-            showProgress('构建城市...', 50);
+            showProgress('构建城市...', 70);
             buildWorld();
             // v6.12 (M3.4): PBR 批量增强（envMapIntensity 1.2× + 车漆 clearcoat）
             if (window.RendererModule && window.RendererModule.enhancePBR) {
                 window.RendererModule.enhancePBR(scene, { envMapIntensityMul: 1.2 });
             }
+            // v6.9: GLB 加载完后注入玩家身体
+            try { createPlayerMesh(); } catch(e) { console.warn('[BG] createPlayerMesh failed', e); }
             if(lt) lt.textContent = '启动游戏...';
             showProgress('启动游戏...', 90);
-            // v6.1.2: 不再 await GLB（避免卡死）
-            // 启动 5 秒后后台慢慢加载 GLB，避免阻塞首屏
-            setTimeout(() => {
-                loadRealModels()
-                    .then(() => {
-                        // v6.9: GLB 加载完后注入玩家身体
-                        try { createPlayerMesh(); } catch(e) { console.warn('[BG] createPlayerMesh failed', e); }
-                    })
-                    .catch(e => {
-                        console.warn('[BG] real models failed (non-fatal)', e);
-                    });
-            }, 5000);
         } catch(e){
             const lb = document.getElementById('loadText');
             if(lb) lb.textContent = '初始化失败: ' + e.message;
