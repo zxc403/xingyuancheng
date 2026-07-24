@@ -25,3 +25,13 @@ All assets below are **free for commercial and personal use** under the stated t
 ## Existing APEX / Xingyuan City Assets
 
 Assets already present in `assets/models/` (characters, vehicles, PBR samples, props, scenes) retain their original licenses as noted in the project changelog.
+
+## Kenney `city-kit-industrial`
+
+- **License:** CC0 (Public Domain)
+- **Used:** `assets/models/kenney/industrial/` — 20 industrial buildings + chimneys + storage tank
+
+## Kenney `blocky-characters`
+
+- **License:** CC0 (Public Domain)
+- **Used:** `assets/models/kenney/pedestrians/` — 18 blocky pedestrian characters (NPC placeholders)
