@@ -51,7 +51,7 @@ export const CHARACTERS = {
     // ===== 人形角色（humanoid, 7 套） =====
     char_xbot: {
         key: 'char_xbot',
-        url: 'assets/models/characters/Xbot.glb',
+        url: 'assets/models/characters/Xbot.glb?v=3',
         size: 1.7,
         tints: [/Beta_HighLimbsGeoSG2|Beta_HighLimbs/i],
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -63,7 +63,7 @@ export const CHARACTERS = {
     },
     char_soldier: {
         key: 'char_soldier',
-        url: 'assets/models/characters/Soldier.glb',
+        url: 'assets/models/characters/Soldier.glb?v=3',
         size: 1.8,
         tints: [/VanguardBodyMat/i],
         clipMap: { idle: ['Idle'], walk: ['Walk'], run: ['Run'], tpose: ['TPose'] },
@@ -75,7 +75,7 @@ export const CHARACTERS = {
     },
     char_barbarian: {
         key: 'char_barbarian',
-        url: 'assets/models/characters/Barbarian.glb',
+        url: 'assets/models/characters/Barbarian.glb?v=3',
         size: 1.85,
         tints: [/.*/],  // 全部可染
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -87,7 +87,7 @@ export const CHARACTERS = {
     },
     char_knight: {
         key: 'char_knight',
-        url: 'assets/models/characters/Knight.glb',
+        url: 'assets/models/characters/Knight.glb?v=3',
         size: 1.85,
         tints: [/.*/],
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -99,7 +99,7 @@ export const CHARACTERS = {
     },
     char_mage: {
         key: 'char_mage',
-        url: 'assets/models/characters/Mage.glb',
+        url: 'assets/models/characters/Mage.glb?v=3',
         size: 1.7,
         tints: [/.*/],
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -111,7 +111,7 @@ export const CHARACTERS = {
     },
     char_rogue: {
         key: 'char_rogue',
-        url: 'assets/models/characters/Rogue.glb',
+        url: 'assets/models/characters/Rogue.glb?v=3',
         size: 1.75,
         tints: [/.*/],
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -123,7 +123,7 @@ export const CHARACTERS = {
     },
     char_rogue_h: {
         key: 'char_rogue_h',
-        url: 'assets/models/characters/Rogue_Hooded.glb',
+        url: 'assets/models/characters/Rogue_Hooded.glb?v=3',
         size: 1.75,
         tints: [/.*/],
         clipMap: { idle: ['idle', 'breath'], walk: ['walk', 'walking'], run: ['run', 'jog'] },
@@ -135,7 +135,7 @@ export const CHARACTERS = {
     },
     char_robot: {
         key: 'char_robot',
-        url: 'assets/models/characters/RobotExpressive.glb',
+        url: 'assets/models/characters/RobotExpressive.glb?v=3',
         size: 1.7,
         tints: [/.*/],
         // RobotExpressive 13 套：Idle / Walking / Running / Dance / Jump / Death / Sit / StandUp / ThumbsUp / Wave / Yes / No / Punch
@@ -158,7 +158,7 @@ export const CHARACTERS = {
     },
     char_rpm: {
         key: 'char_rpm',
-        url: 'assets/models/characters/ReadyPlayer.glb',
+        url: 'assets/models/characters/ReadyPlayer.glb?v=3',
         size: 1.7,
         tints: [/.*/],
         clipMap: { idle: ['idle'], walk: ['walk'], run: ['run'] },
@@ -170,7 +170,7 @@ export const CHARACTERS = {
     },
     char_knight_student: {
         key: 'char_knight_student',
-        url: 'assets/models/characters/LeePerrySmith.glb',
+        url: 'assets/models/characters/LeePerrySmith.glb?v=3',
         size: 1.7,
         tints: [/.*/],
         clipMap: { idle: ['idle'], walk: ['walk'], run: ['run'] },
@@ -184,7 +184,7 @@ export const CHARACTERS = {
     // ===== 静态道具（prop, 1 套） =====
     prop_nefertiti: {
         key: 'prop_nefertiti',
-        url: 'assets/models/characters/Nefertiti.glb',
+        url: 'assets/models/characters/Nefertiti.glb?v=3',
         size: 1.5,
         tints: [],
         clipMap: {},
@@ -196,7 +196,7 @@ export const CHARACTERS = {
     },
     prop_facecap: {
         key: 'prop_facecap',
-        url: 'assets/models/characters/Facecap.glb',
+        url: 'assets/models/characters/Facecap.glb?v=3',
         size: 0.3,
         tints: [],
         clipMap: {},
@@ -210,7 +210,7 @@ export const CHARACTERS = {
     // ===== 骨骼动画动物（animal, 6 套） =====
     animal_fox: {
         key: 'animal_fox',
-        url: 'assets/models/characters/Fox.glb',
+        url: 'assets/models/characters/Fox.glb?v=3',
         size: 0.4,
         tints: [],
         clipMap: { idle: ['Survey'], walk: ['Walk'], run: ['Run'] },
@@ -222,7 +222,7 @@ export const CHARACTERS = {
     },
     animal_horse: {
         key: 'animal_horse',
-        url: 'assets/models/characters/Horse.glb',
+        url: 'assets/models/characters/Horse.glb?v=3',
         size: 1.6,
         tints: [],
         clipMap: { idle: ['idle'], walk: ['walk'], run: ['run', 'gallop'] },
@@ -234,7 +234,7 @@ export const CHARACTERS = {
     },
     animal_duck: {
         key: 'animal_duck',
-        url: 'assets/models/characters/Duck.glb',
+        url: 'assets/models/characters/Duck.glb?v=3',
         size: 0.25,
         tints: [],
         clipMap: { idle: ['idle'] },
@@ -246,7 +246,7 @@ export const CHARACTERS = {
     },
     animal_parrot: {
         key: 'animal_parrot',
-        url: 'assets/models/characters/Parrot.glb',
+        url: 'assets/models/characters/Parrot.glb?v=3',
         size: 0.3,
         tints: [],
         clipMap: { idle: ['idle'], fly: ['fly', 'flap'] },
@@ -258,7 +258,7 @@ export const CHARACTERS = {
     },
     animal_stork: {
         key: 'animal_stork',
-        url: 'assets/models/characters/Stork.glb',
+        url: 'assets/models/characters/Stork.glb?v=3',
         size: 0.8,
         tints: [],
         clipMap: { idle: ['idle'], fly: ['fly'] },
@@ -270,7 +270,7 @@ export const CHARACTERS = {
     },
     animal_flamingo: {
         key: 'animal_flamingo',
-        url: 'assets/models/characters/Flamingo.glb',
+        url: 'assets/models/characters/Flamingo.glb?v=3',
         size: 1.0,
         tints: [],
         clipMap: { idle: ['idle'], fly: ['fly'] },
