@@ -301,6 +301,8 @@
     // ============================================================
 
     import * as THREE from 'three';
+    // v6.11.5 (WB): 暴露 THREE 到 window 供 debug panel/控制台访问
+    window.THREE = THREE;
     import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -380,17 +382,17 @@
         if(r.ok){
             return import('./vendor/three/addons/loaders/GLTFLoader.js?v=4');
         }
-    }).then(function(m){ if(m) GLTFLoader = m.GLTFLoader; }).catch(function(){});
+    }).then(function(m){ if(m) { GLTFLoader = m.GLTFLoader; window.GLTFLoader = GLTFLoader; } }).catch(function(){ window.GLTFLoader = null; });
 
     // v6.11.2 (WB): 补齐 DRACO + KTX2 解码器，支持压缩模型（LittlestTokyo 用 Draco，部分 PBR 用 KTX2）
     let DRACOLoader = null, KTX2Loader = null;
     let DRACOLoaderPromise = null, KTX2LoaderPromise = null;
     DRACOLoaderPromise = fetch('./vendor/three/addons/loaders/DRACOLoader.js?v=4', {method:'HEAD'}).then(function(r){
         if(r.ok){ return import('./vendor/three/addons/loaders/DRACOLoader.js?v=4'); }
-    }).then(function(m){ if(m) DRACOLoader = m.DRACOLoader; }).catch(function(){});
+    }).then(function(m){ if(m) { DRACOLoader = m.DRACOLoader; window.DRACOLoader = DRACOLoader; } }).catch(function(){ window.DRACOLoader = null; });
     KTX2LoaderPromise = fetch('./vendor/three/addons/loaders/KTX2Loader.js?v=4', {method:'HEAD'}).then(function(r){
         if(r.ok){ return import('./vendor/three/addons/loaders/KTX2Loader.js?v=4'); }
-    }).then(function(m){ if(m) KTX2Loader = m.KTX2Loader; }).catch(function(){});
+    }).then(function(m){ if(m) { KTX2Loader = m.KTX2Loader; window.KTX2Loader = KTX2Loader; } }).catch(function(){ window.KTX2Loader = null; });
 
     // ---- 工具 ----
     const U = {
@@ -715,7 +717,7 @@
         currentHDRKey = key;
         const url = HDR_LIST[key];
         try {
-            const loader = new THREE.RGBELoader();
+            const loader = new RGBELoader();
             const tex = await loader.loadAsync(url);
             _applyHDRTex(tex);
             const isNight = mode==='night'||mode==='night_d'||mode==='night_e';
@@ -786,7 +788,7 @@
         } catch(e){ console.warn('[HDR] toggle sky failed', e); showNotif('⚠️ HDRI 天空切换失败'); }
     };
     async function loadRealHDR() {
-        const loader = new THREE.RGBELoader();
+        const loader = new RGBELoader();
         // 首屏：1K (6.7MB)，约 1.5s 出图
         return new Promise((resolve) => {
             loader.load('assets/hdri/day_quarry.hdr', (hdrTex) => {
@@ -800,7 +802,7 @@
                 // 后台：5 秒后异步升级 4K，不阻塞首屏
                 setTimeout(async () => {
                     try {
-                        const loader4k = new THREE.RGBELoader();
+                        const loader4k = new RGBELoader();
                         const tex4k = await loader4k.loadAsync('assets/hdri/kloppenheim_06_4k.hdr');
                         tex4k.mapping = THREE.EquirectangularReflectionMapping;
                         window._curEqHDR = tex4k;   // v6.13 (WB): 保留给 HDRI 真实天空开关
@@ -4663,7 +4665,7 @@
             'GLTF: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N'),
             'DRACO: ' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N'),
             'KTX2: ' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
-            'RGBE: ' + (typeof window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
+            'RGBE: ' + (window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
         ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
         if(w._wbExtra) lines.push(w._wbExtra);
