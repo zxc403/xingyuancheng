@@ -945,6 +945,8 @@
                 console.log('[RealModel] loaded', it.key);
             } catch (e) {
                 console.warn('[RealModel] failed', it.key, e);
+                if (!window._modelErrors) window._modelErrors = [];
+                window._modelErrors.push({ key: it.key, err: e.message || String(e), url: it.url });
             }
         })());
         await Promise.allSettled(tasks);
@@ -4668,6 +4670,12 @@
             'RGBE: ' + (window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
         ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
+        if(w._modelErrors && w._modelErrors.length) {
+            var es = w._modelErrors.slice(0, 4);
+            for(var i=0;i<es.length;i++){
+                lines.push('M' + i + ': ' + es[i].key + ' ' + es[i].err.substring(0,30));
+            }
+        }
         if(w._wbExtra) lines.push(w._wbExtra);
         d.textContent = lines.join('\n');
     }
