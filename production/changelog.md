@@ -1,5 +1,34 @@
 # Changelog
 
+## v6.11.0 — 角色系统 1：注册表 + 18 角色（commit 1 of 6）
+- ✅ **M2.1**: 下载 11 套 CC0/MIT 角色模型
+  - RobotExpressive.glb (464KB, 13 clips, MIT)
+  - Fox.glb (163KB, 3 clips, CC0/Khronos)
+  - LeePerrySmith.glb (405KB, CC-BY)
+  - Facecap.glb (333KB, 带 morph target, CC-BY)
+  - ReadyPlayer.glb (1.8MB, CC0/ReadyPlayer.me)
+  - Nefertiti.glb (1.2MB, 静态雕像, CC0)
+  - Duck/Parrot/Stork/Flamingo/Horse.glb (CC-BY/MIT)
+- ✅ 总角色：7 → **18**（+11）
+- ✅ 总模型大小：20MB → 24MB（+4MB，已 Draco/meshopt 压缩）
+- ✅ **M2.2**: 角色中央注册表 `src/entities/CharacterRegistry.js`
+  - `CHARACTERS` 字典：18 角色完整元数据（key/url/size/tints/clipMap/tags/use/license/source/notes）
+  - `getChar(key)` / `listByUse(tag)` / `listByTag(tag)` / `suggestKey(kws)` 4 个查询 API
+  - `exportLoadList()` 扁平化为 `[{key,url}]` 数组给 index.html
+  - `pickClip(animations, intent, keywords)` 替换硬编码 `findAnim` 函数
+  - `dumpRegistry()` 调试输出
+- ✅ index.html 改造
+  - 删 `charList` 7 行硬编码 → `...exportCharLoadList()` 自动注入 18 行
+  - NPC `createNPC` 替换 `BEH_GLB` 硬编码为 7 行为 v6.11 概率分布
+  - `createNPC` 退路用 `listByTag('humanoid')` 随机池（10 角色可选）
+  - NPC `findAnim('idle'/'walk'/'run')` 替换为 `pickClip(animations, intent, cm[id])` 走注册表 clipMap
+  - `placeG` ambient 区域加 9 个新模型（Flamingo/Stork/Fox/Parrot/Duck/Nefertiti/Horse/RPM/Robot）
+- ⏸ **M2.3 完整 blend tree** - 待做（idle/walk/run/jog/crouch/talk，priority high）
+- ⏸ **M2.4 morph target** - 待做（facecap 已有 morph，待接）
+- ⏸ **M2.5 Avatar 自定义** - 待做
+- ⏸ **M2.6 角色 IK** - 待做
+- 📦 部署：https://github.com/zxc403/xingyuancheng
+
 ## v6.10.6 — 渲染后端抽象层 + vendor 清理（commit 7 of 7）
 - ✅ 新增 `src/core/RendererBackend.js` - 渲染后端抽象层
 - ✅ `detectCapabilities()` - 探测 WebGL2 / WebGPU 能力 + 扩展

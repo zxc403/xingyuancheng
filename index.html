@@ -307,6 +307,17 @@
     // v6.10.5: 抽离 Collision + Pathfinder
     import { Collision as CollisionModule } from './src/physics/Collision.js';
     import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js';
+    // v6.11.0: 角色中央注册表
+    import {
+        CHARACTERS,
+        getChar as getCharReg,
+        listByUse as listCharsByUse,
+        listByTag as listCharsByTag,
+        suggestKey as suggestCharKey,
+        exportLoadList as exportCharLoadList,
+        pickClip as pickAnimClip,
+        dumpRegistry as dumpCharRegistry
+    } from './src/entities/CharacterRegistry.js';
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
     window.__game.renderer = new RendererModule();
@@ -696,6 +707,8 @@
     async function loadRealModels() {
         if (!window._realModels) window._realModels = {};
         if (!window._npcMixers) window._npcMixers = [];  // v6.6: NPC 动画 mixer 列表
+        // v6.11.0: 输出角色注册表 dump
+        try { dumpCharRegistry(); } catch(e) { console.warn('[CharReg] dump failed', e); }
         // v6.10.5: 加挂 Collision 模块（收集场景中所有碰撞体）
         if (window.__game && window.__game.collision && typeof scene !== 'undefined' && scene) {
             window.__game.collision.init(scene);
@@ -729,15 +742,9 @@
             { key: 'pbr_cesium',    url: 'assets/models/pbr_assets/CesiumMan.glb' },
             // 场景
             { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb' },
-            // 角色
-            { key: 'char_barbarian', url: 'assets/models/characters/Barbarian.glb' },
-            { key: 'char_knight',    url: 'assets/models/characters/Knight.glb' },
-            { key: 'char_mage',      url: 'assets/models/characters/Mage.glb' },
-            { key: 'char_rogue',     url: 'assets/models/characters/Rogue.glb' },
-            { key: 'char_rogue_h',   url: 'assets/models/characters/Rogue_Hooded.glb' },
-            // v6.6 写实角色：Xbot（女）/ Soldier（警察）
-            { key: 'char_xbot',      url: 'assets/models/characters/Xbot.glb' },
-            { key: 'char_soldier',   url: 'assets/models/characters/Soldier.glb' },
+            // 角色（v6.11.0: 从 CharacterRegistry 注册表批量生成，18 个角色）
+            //     删字符硬编码，所有新增角色走 src/entities/CharacterRegistry.js
+            ...exportCharLoadList(),
             // v6.2 新增：道具（用于替换 pickup/glow/摊位）
             { key: 'prop_chest',       url: 'assets/models/props/chest.glb' },
             { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb' },
@@ -1946,17 +1953,24 @@
 
     function createNPC(type,x,z,custom) {
         const g = new THREE.Group();
-        // v6.2: 优先用真实 GLB 角色（已加载）
-        const NPC_GLB = ['char_barbarian','char_knight','char_mage','char_rogue','char_rogue_h','char_xbot','char_soldier'];
-        // v6.6: 警察/工人 → 写实；其他 → 奇幻
+        // v6.11.0: 从 CharacterRegistry 选 GLB（替换 v6.6 硬编码 7 角色）
+        //     优先用 behavior → 角色映射表；没有时从 listByTag('humanoid') 随机抽
         const BEH_GLB = {
-            police: Math.random()<0.7 ? 'char_soldier' : 'char_knight',   // 70% 写实士兵
-            gang:   'char_barbarian',
-            worker: Math.random()<0.5 ? 'char_xbot' : 'char_mage',          // 50% 写实女性
+            police: Math.random() < 0.7 ? 'char_soldier' : (Math.random() < 0.5 ? 'char_knight' : 'char_soldier'),
+            gang:   Math.random() < 0.5 ? 'char_barbarian' : (Math.random() < 0.5 ? 'char_rogue' : 'char_rogue_h'),
+            worker: Math.random() < 0.4 ? 'char_xbot' : (Math.random() < 0.4 ? 'char_mage' : 'char_rpm'),
             student:'char_rogue',
-            vendor: 'char_rogue_h'
+            vendor: 'char_rogue_h',
+            vendor_alt: 'char_mage',
+            student_alt: 'char_robot',
+            pedestrian: null  // pedestrian 从 humanoid 池随机
         };
-        const glbKey = BEH_GLB[type.beh] || NPC_GLB[Math.floor(Math.random()*NPC_GLB.length)];
+        let glbKey = BEH_GLB[type.beh];
+        if (!glbKey) {
+            // 退路：从注册表 humanoid tag 池随机选
+            const humanoids = listCharsByTag('humanoid').map(c => c.key);
+            glbKey = humanoids[Math.floor(Math.random() * humanoids.length)] || 'char_xbot';
+        }
         let useGLB = false;
         let animUserData = null;  // v6.6: 动画系统引用
         if (window._realModels && window._realModels[glbKey]) {
@@ -1964,8 +1978,9 @@
                 const charG = window._realModels[glbKey].clone(true);
                 const box = new THREE.Box3().setFromObject(charG);
                 const size = new THREE.Vector3(); box.getSize(size);
-                // RPG 角色 GLB 约 1.8-2m 高，缩放 0.9
-                const targetH = 1.7;
+                // v6.11.0: 从注册表读目标身高（默认 1.7m）
+                const charDef = getCharReg(glbKey);
+                const targetH = (charDef && charDef.size) || 1.7;
                 const s = targetH / size.y;
                 charG.scale.set(s, s, s);
                 const center = new THREE.Vector3(); box.getCenter(center);
@@ -2002,15 +2017,17 @@
                 g.add(charG);
                 useGLB = true;
 
-                // v6.6: AnimationMixer 初始化
+                // v6.11.0: AnimationMixer 初始化（用 CharacterRegistry.pickClip 替换硬编码关键词）
                 const src = window._realModelsSrc && window._realModelsSrc[glbKey];
+                const charDef = getCharReg(glbKey);
                 if (src && src.animations && src.animations.length) {
                     try {
                         const mixer = new THREE.AnimationMixer(charG);
-                        const findAnim = (kw) => src.animations.find(a => a.name && a.name.toLowerCase().includes(kw));
-                        const idle = findAnim('idle') || findAnim('breath') || src.animations[0];
-                        const walk = findAnim('walk') || findAnim('walking') || idle;
-                        const run  = findAnim('run')  || findAnim('jog')   || walk;
+                        // v6.11.0: 从注册表读 clipMap（替代硬编码 'idle'/'walk'/'run' 关键词）
+                        const cm = (charDef && charDef.clipMap) || {};
+                        const idle = pickAnimClip(src.animations, 'idle', cm.idle) || src.animations[0];
+                        const walk = pickAnimClip(src.animations, 'walk', cm.walk) || idle;
+                        const run  = pickAnimClip(src.animations, 'run',  cm.run)  || walk;
                         const actI = mixer.clipAction(idle); actI.setLoop(THREE.LoopRepeat, Infinity);
                         const actW = mixer.clipAction(walk); actW.setLoop(THREE.LoopRepeat, Infinity);
                         const actR = mixer.clipAction(run);  actR.setLoop(THREE.LoopRepeat, Infinity);
@@ -3879,6 +3896,26 @@
             placeG('pbr_cesium',     35,  42, 0, 0.4);
             // 东京小景：远景 60m 外
             placeG('pbr_tokyo',      20,  90, 0, 0.015);
+            // ===== v6.11.0: ambient 角色展圈（公园区，距 PBR 圈 30m 外） =====
+            //  靠近 spawn 方向 -60 ~ -80m，让玩家能 5-10 秒走到看见
+            if (window._realModels) {
+                // 河畔：Flamingo + Stork（静态站立即可）
+                placeG('animal_flamingo',  -55, 30, Math.PI/4, 1.0);
+                placeG('animal_stork',     -50, 40, -Math.PI/4, 1.0);
+                // 草地：Fox（4 足）
+                placeG('animal_fox',       -65, 25, 0, 1.0);
+                // 池塘：Parrot + Duck
+                placeG('animal_parrot',    -70, 35, Math.PI/2, 1.0);
+                placeG('animal_duck',      -72, 32, 0, 1.0);
+                // 博物馆：Nefertiti 半身像
+                placeG('prop_nefertiti',   -60, 50, 0, 1.0);
+                // Horse（远景）
+                placeG('animal_horse',     -80, 60, 0, 1.0);
+                // RPM 卡通人物展示
+                placeG('char_rpm',         -75, 45, 0, 1.0);
+                // 机器人（独立展台）
+                placeG('char_robot',       -68, 55, 0, 1.0);
+            }
         }
     }
 
