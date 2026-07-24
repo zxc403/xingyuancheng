@@ -120,3 +120,5 @@ const FilmShader = {
         }
     `
 };
+
+export { FilmShader };
