@@ -4639,5 +4639,44 @@
 
     console.log('星渊城 v6.0 终极融合版 完全加载');
 </script>
-</body>
-</html>
+
+<!-- v6.11.4 (WB): debug overlay -->
+<script>
+(function(){
+    if (/noDebug/i.test(location.search)) return;
+    var d = document.createElement('div');
+    d.id = 'wbDebug';
+    d.style.cssText = 'position:fixed;top:4px;left:4px;z-index:99999;'+
+        'background:rgba(0,0,0,.85);color:#0f0;font:11px/1.4 monospace;'+
+        'padding:6px 10px;border-radius:6px;max-height:60vh;overflow:auto;'+
+        'white-space:pre;pointer-events:none;user-select:none;'+
+        'text-shadow:0 0 2px #000;min-width:280px;';
+    function poll(){
+        var w=window, player = w.__game && w.__game.player;
+        var real = w._realModels || {};
+        var keys = Object.keys(real);
+        var lines = [
+            'Xbot: ' + (!!real['char_xbot'] ? 'Y' : 'N') + '  HDR: ' + (!!w._realHDR ? 'Y' : 'N') + '  Tex: ' + (!!w._realTex ? 'Y' : 'N'),
+            'Models: ' + keys.length + '  Player: ' + (player && player.mesh ? (player.mesh.type||'?') : 'no mesh'),
+            'Scene: ' + (w.scene ? w.scene.children.length : '?') + '  Sky: ' + (!!w._skyDome ? 'Y' : 'N'),
+            'FPS: ' + (w.__fps||'?'),
+            'GLTF: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N'),
+            'DRACO: ' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N'),
+            'KTX2: ' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
+            'RGBE: ' + (typeof window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
+        ];
+        if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
+        if(w._wbExtra) lines.push(w._wbExtra);
+        d.textContent = lines.join('\n');
+    }
+    window.addEventListener('error', function(e){ w._lastErr = e.message || String(e); });
+    window.addEventListener('unhandledrejection', function(e){
+        window._lastErr = (e.reason && (e.reason.message||String(e.reason))) || 'rejection';
+    });
+    setInterval(poll, 1500); poll();
+    document.body.appendChild(d);
+    window._wbDebugEl = d;
+    window._wbDebugToggle = function(){ d.style.display = d.style.display === 'none' ? '' : 'none'; };
+})();
+</script>
+</body></html>
