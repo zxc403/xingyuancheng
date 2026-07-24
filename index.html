@@ -852,17 +852,28 @@
         if (!GLTFLoader) { console.warn('[loadRealModels] GLTFLoader 未加载，跳过真实模型，回退程序化'); return; }
         const loader = new GLTFLoader();
         // v6.11.2 (WB): 挂接 DRACO / KTX2 解码器（若存在），支持压缩模型
-        if (DRACOLoader) {
-            const draco = new DRACOLoader();
-            draco.setDecoderPath('./vendor/three/addons/libs/draco/gltf/');
-            draco.setDecoderConfig({ type: 'wasm' });
-            loader.setDRACOLoader(draco);
+        // v6.11.5: 包 try/catch，避免 setup 异常导致整个 loadRealModels 静默退出（之前 Models 一直 0 就是因为 KTX2.setupSupport/renderer 异常）
+        try {
+            if (DRACOLoader) {
+                const draco = new DRACOLoader();
+                draco.setDecoderPath('./vendor/three/addons/libs/draco/gltf/');
+                draco.setDecoderConfig({ type: 'wasm' });
+                loader.setDRACOLoader(draco);
+            }
+        } catch(e) {
+            if(!window._modelErrors) window._modelErrors = [];
+            window._modelErrors.push({ key: 'DRACO_SETUP', err: e.message||String(e), url: '' });
         }
-        if (KTX2Loader && renderer) {
-            const ktx2 = new KTX2Loader();
-            ktx2.setTranscoderPath('./vendor/three/addons/libs/basis/');
-            ktx2.detectSupport(renderer);
-            loader.setKTX2Loader(ktx2);
+        try {
+            if (KTX2Loader && renderer) {
+                const ktx2 = new KTX2Loader();
+                ktx2.setTranscoderPath('./vendor/three/addons/libs/basis/');
+                ktx2.detectSupport(renderer);
+                loader.setKTX2Loader(ktx2);
+            }
+        } catch(e) {
+            if(!window._modelErrors) window._modelErrors = [];
+            window._modelErrors.push({ key: 'KTX2_SETUP', err: e.message||String(e), url: '' });
         }
         const list = [
             // 建筑
