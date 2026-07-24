@@ -307,25 +307,25 @@
     import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
     // v6.12 (M3.2): 自研 FilmShader（Vignette + Grain + 轻量 FXAA）
-    import { FilmShader } from './src/core/FilmShader.js';
+    import { FilmShader } from './src/core/FilmShader.js?v=3';
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
     // v6.10.1: 抽离 Renderer 模块
-    import { Renderer as RendererModule } from './src/core/Renderer.js';
+    import { Renderer as RendererModule } from './src/core/Renderer.js?v=3';
     window.RendererModule = RendererModule;
     // v6.10.6: 渲染后端抽象层
-    import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js';
+    import { RendererBackend, Backend as BackendEnum } from './src/core/RendererBackend.js?v=3';
     // v6.10.2: 抽离 Input 模块
-    import { Input as InputModule } from './src/core/Input.js';
+    import { Input as InputModule } from './src/core/Input.js?v=3';
     // v6.10.3: 抽离 Player 实体
-    import { Player as PlayerModule } from './src/entities/Player.js';
+    import { Player as PlayerModule } from './src/entities/Player.js?v=3';
     // v6.10.4: 抽离 NPC + Vehicle 实体
-    import { NPC as NPCModule } from './src/entities/NPC.js';
-    import { Vehicle as VehicleModule } from './src/entities/Vehicle.js';
+    import { NPC as NPCModule } from './src/entities/NPC.js?v=3';
+    import { Vehicle as VehicleModule } from './src/entities/Vehicle.js?v=3';
     // v6.10.5: 抽离 Collision + Pathfinder
-    import { Collision as CollisionModule } from './src/physics/Collision.js';
-    import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js';
+    import { Collision as CollisionModule } from './src/physics/Collision.js?v=3';
+    import { Pathfinder as PathfinderModule } from './src/ai/Pathfinder.js?v=3';
     // v6.11.0: 角色中央注册表
     import {
         CHARACTERS,
@@ -336,27 +336,27 @@
         exportLoadList as exportCharLoadList,
         pickClip as pickAnimClip,
         dumpRegistry as dumpCharRegistry
-    } from './src/entities/CharacterRegistry.js';
+    } from './src/entities/CharacterRegistry.js?v=3';
     // v6.11.0: 动画状态机（NPC 子模块通过 window 访问）
-    import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js';
+    import { AnimationStateMachine, AnimState } from './src/entities/AnimationStateMachine.js?v=3';
     window.AnimationStateMachine = AnimationStateMachine;
     window.AnimState = AnimState;
     // v6.11.0: 面部表情 morph 系统
-    import { FacialExpression, EXPRESSION_PRESETS, SUB_EXPRESSIONS } from './src/entities/FacialExpression.js';
+    import { FacialExpression, EXPRESSION_PRESETS, SUB_EXPRESSIONS } from './src/entities/FacialExpression.js?v=3';
     window.FacialExpression = FacialExpression;
     window.EXPRESSION_PRESETS = EXPRESSION_PRESETS;
     window.SUB_EXPRESSIONS = SUB_EXPRESSIONS;
     // v6.11.0: Avatar 自定义
-    import { AvatarCustomization, BODY_PRESETS, SKIN_PRESETS, OUTFIT_PALETTE, DEFAULT_CONFIG } from './src/entities/AvatarCustomization.js';
+    import { AvatarCustomization, BODY_PRESETS, SKIN_PRESETS, OUTFIT_PALETTE, DEFAULT_CONFIG } from './src/entities/AvatarCustomization.js?v=3';
     window.AvatarCustomization = AvatarCustomization;
     window.BODY_PRESETS = BODY_PRESETS;
     window.SKIN_PRESETS = SKIN_PRESETS;
     window.OUTFIT_PALETTE = OUTFIT_PALETTE;
     // v6.11.0 (M2.5): Avatar 自定义 UI 面板
-    import { AvatarPanel } from './src/ui/AvatarPanel.js';
+    import { AvatarPanel } from './src/ui/AvatarPanel.js?v=3';
     window.AvatarPanel = AvatarPanel;
     // v6.11.0 (M2.6): 角色 IK 系统
-    import { IKSystem } from './src/entities/IKSystem.js';
+    import { IKSystem } from './src/entities/IKSystem.js?v=3';
     window.IKSystem = IKSystem;
     // 全局暴露给其他 src/ 模块使用
     window.__game = window.__game || {};
