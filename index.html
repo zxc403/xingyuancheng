@@ -841,18 +841,22 @@
         try {
         if (!window._realModels) window._realModels = {};
         if (!window._npcMixers) window._npcMixers = [];  // v6.6: NPC 动画 mixer 列表
+        window.__stage = 'INIT_OK';
         // v6.11.0: 输出角色注册表 dump
-        try { dumpCharRegistry(); } catch(e) { console.warn('[CharReg] dump failed', e); }
+        try { dumpCharRegistry(); window.__stage='DUMP_OK'; } catch(e) { console.warn('[CharReg] dump failed', e); window.__stage='DUMP_FAIL'; }
         // v6.10.5: 加挂 Collision 模块（收集场景中所有碰撞体）
         if (window.__game && window.__game.collision && typeof scene !== 'undefined' && scene) {
-            window.__game.collision.init(scene);
-        }
+            try { window.__game.collision.init(scene); window.__stage='COLLISION_OK'; } catch(e) { window.__stage='COLLISION_FAIL'; }
+        } else { window.__stage='NO_COLLISION'; }
+        window.__stage = 'AWAITS';
         // v6.11.3: 等待解码器模块加载完成（避免移动网络下 GLTFLoader 异步导入竞态导致回退）
         if (GLTFLoaderPromise) await GLTFLoaderPromise;
         if (DRACOLoaderPromise) await DRACOLoaderPromise;
         if (KTX2LoaderPromise) await KTX2LoaderPromise;
+        window.__stage = 'AFTER_AWAITS';
         if (!GLTFLoader) { console.warn('[loadRealModels] GLTFLoader 未加载，跳过真实模型，回退程序化'); return; }
         const loader = new GLTFLoader();
+        window.__stage = 'NEW_GLTF_OK';
         // v6.11.2 (WB): 挂接 DRACO / KTX2 解码器（若存在），支持压缩模型
         // v6.11.5: 包 try/catch，避免 setup 异常导致整个 loadRealModels 静默退出（之前 Models 一直 0 就是因为 KTX2.setupSupport/renderer 异常）
         try {
@@ -878,7 +882,6 @@
             window._modelErrors.push({ key: 'KTX2_SETUP', err: e.message||String(e), url: '' });
         }
         const list = [
-            // 建筑
             { key: 'building_city', url: 'assets/models/buildings/city_building.glb?v=4' },
             { key: 'building_block', url: 'assets/models/buildings/city_block.glb?v=4' },
             // 车辆（v6.2 修：磁盘上是 car1_truck.glb / car2_dragster.glb / car3_minivan.glb / cars_big_set.glb）
@@ -916,6 +919,7 @@
             { key: 'prop_barrier',     url: 'assets/models/props/barrier_column.gltf.glb?v=4' },
             { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb?v=4' },
         ];
+        window.__stage = 'LIST_BUILT';
         // v6.2 改：并发加载（之前是串行，5 个角色 GLB 每个 3.5M 串行要 8+ 秒）
         const tasks = list.map(it => (async () => {
             try {
@@ -964,17 +968,17 @@
             }
         })());
         await Promise.allSettled(tasks);
+        window.__stage = 'ALL_DONE';
         return window._realModels;
         } catch(e) {
             if(!window._modelErrors) window._modelErrors = [];
             var msg = (e && e.message) || String(e);
             var propMatch = msg.match(/reading ['"]([^'"]+)['"]/);
             var prop = propMatch ? propMatch[1] : '';
-            // 取第 1 行 stack 抽出大概的行号定位（前 30 字符）
             var stk = (e && e.stack) ? String(e.stack).split('\n')[1] || '' : '';
             stk = stk.replace(/\\/g,'/').substring(0,80);
             window._modelErrors.unshift({
-                key: 'LOAD_REAL_FATAL',
+                key: 'LOAD_REAL_FATAL@(stage='+(window.__stage||'?')+')',
                 err: msg + (prop?' [prop='+prop+']':'') + (stk?' [stk]'+stk:''),
                 url: ''
             });
@@ -4692,7 +4696,7 @@
             'Xbot: ' + (!!real['char_xbot'] ? 'Y' : 'N') + '  HDR: ' + (!!w._realHDR ? 'Y' : 'N') + '  Tex: ' + (!!w._realTex ? 'Y' : 'N'),
             'Models: ' + keys.length + '  Player: ' + (player && player.mesh ? (player.mesh.type||'?') : 'no mesh'),
             'Scene: ' + (w.scene ? w.scene.children.length : '?') + '  Sky: ' + (!!w._skyDome ? 'Y' : 'N'),
-            'FPS: ' + (w.__fps||'?'),
+            'Stage: ' + (w.__stage||'?') + '  FPS: ' + (w.__fps||'?'),
             'GLTF: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N'),
             'DRACO: ' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N'),
             'KTX2: ' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
