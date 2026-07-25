@@ -4700,9 +4700,6 @@
             'G/D/K: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N') + '/' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N') + '/' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
             'Loaded: ' + (keys.length? keys.slice(0,3).join(',') : '-'),
         ];
-            'KTX2: ' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
-            'RGBE: ' + (window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
-        ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
         if(w._modelErrors && w._modelErrors.length) {
             var es = w._modelErrors.slice(0, 4);
