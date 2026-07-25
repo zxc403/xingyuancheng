@@ -12,8 +12,8 @@
     (function(){
         try {
             window._isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-            // v6.12.2: 移动端限制 pixel ratio 到 1.5，减少 GPU 负担提升 FPS
-            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 1.5) : Math.min(window.devicePixelRatio||1, 2);
+            // v6.12.3: 移动端限制 pixel ratio 到 2.0，模型精简后 GPU 有余量，减少锯齿
+            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 2.0) : Math.min(window.devicePixelRatio||1, 2);
             // 拦截未处理的 Promise 拒绝 → 不再触发 Chromium 红条
             window.addEventListener('unhandledrejection', function(e){
                 console.warn('[v6.7.1] unhandled promise:', e.reason && (e.reason.message||e.reason));
@@ -451,14 +451,13 @@
     playerWeaponMesh.visible = true;
     function buildWeaponMesh(slot) {
         while (playerWeaponMesh.children.length) playerWeaponMesh.remove(playerWeaponMesh.children[0]);
+        playerWeaponMesh.visible = true;  // v6.12.3: 默认显示，只有 melee 隐藏
         let m;
         const matBody = new THREE.MeshStandardMaterial({color:0x222222, metalness:0.85, roughness:0.25});
         const matAccent = new THREE.MeshStandardMaterial({color:0x444444, metalness:0.7, roughness:0.4});
         if (slot === 'melee') {
-            // 拳头：肉色球
-            m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshStandardMaterial({color:0xe8c8a0, roughness:0.6}));
-            m.position.set(0, 0, 0);
-            playerWeaponMesh.add(m);
+            // v6.12.3: 拳头模式下不显示悬浮球，避免玩家误把它当成自己角色
+            playerWeaponMesh.visible = false;
         } else if (slot === 'handgun' || slot === 'shotgun' || slot === 'smg' || slot === 'rifle' || slot === 'sniper' || slot === 'heavy') {
             // 通用枪身
             const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), matBody);
@@ -517,7 +516,7 @@
     // 用户可手动改（通过 ? 帮派面板或快捷键 F4）
     const QUALITY_PRESETS = {
         0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.4, ssao: false,  ssaoRadius: 0.0, post: false },
-        1: { name: '均衡', pixelRatioCap: 1.5, shadow: 1024, bloomStrength: 0.7, ssao: true,  ssaoRadius: 0.3, post: true },
+        1: { name: '均衡', pixelRatioCap: 1.5, shadow: 512, bloomStrength: 0.7, ssao: true,  ssaoRadius: 0.3, post: true },
         2: { name: '高质', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 0.95, ssao: true, ssaoRadius: 0.6, post: true },
         3: { name: '极致', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 1.2, ssao: true, ssaoRadius: 0.8, post: true }
     };
@@ -946,8 +945,16 @@
             { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb?v=4' },
         ];
         window.__stage = 'LIST_BUILT';
+        // v6.12.3: 移动端只加载核心模型，避免 45 个模型把 GPU/内存压垮导致卡顿
+        let finalList = list;
+        if (window._isMobile) {
+            const essential = new Set(['char_xbot','building_city','building_block','car_truck','car_dragster','scene_cyberpunk','prop_chest','prop_coin']);
+            const before = finalList.length;
+            finalList = finalList.filter(it => essential.has(it.key));
+            console.log('[loadRealModels] 移动端模型精简:', before, '->', finalList.length);
+        }
         // v6.12.0 修：并发池限制 3 个，避免移动网络下 6 连接槽被抢光导致全部 timeout
-        await asyncPool(3, list, async (it) => {
+        await asyncPool(3, finalList, async (it) => {
             try {
                 const gltf = await Promise.race([
                     loader.loadAsync(it.url),
@@ -4024,7 +4031,7 @@
             sun.position.set(-80,120,-60);
         }
         sun.castShadow = true;
-        sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);   // v6.12.2: 移动端降阴影分辨率提 FPS
+        sun.shadow.mapSize.set(isMobile ? 512 : 2048, isMobile ? 512 : 2048);   // v6.12.3: 移动端阴影再降到 512 保流畅
         sun.shadow.camera.near=1; sun.shadow.camera.far=500;
         sun.shadow.camera.left=-250; sun.shadow.camera.right=250;
         sun.shadow.camera.top=250; sun.shadow.camera.bottom=-250;
