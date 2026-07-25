@@ -4697,16 +4697,17 @@
             'Models: ' + keys.length + '  Player: ' + (player && player.mesh ? (player.mesh.type||'?') : 'no mesh'),
             'Scene: ' + (w.scene ? w.scene.children.length : '?') + '  Sky: ' + (!!w._skyDome ? 'Y' : 'N'),
             'Stage: ' + (w.__stage||'?') + '  FPS: ' + (w.__fps||'?'),
-            'GLTF: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N'),
-            'DRACO: ' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N'),
+            'G/D/K: ' + (typeof w.GLTFLoader === 'function' ? 'Y' : 'N') + '/' + (typeof w.DRACOLoader === 'function' ? 'Y' : 'N') + '/' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
+            'Loaded: ' + (keys.length? keys.slice(0,3).join(',') : '-'),
+        ];
             'KTX2: ' + (typeof w.KTX2Loader === 'function' ? 'Y' : 'N'),
             'RGBE: ' + (window.THREE && typeof window.THREE.RGBELoader === 'function' ? 'Y' : 'N'),
         ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
         if(w._modelErrors && w._modelErrors.length) {
-            var es = w._modelErrors.slice(0, 2);
+            var es = w._modelErrors.slice(0, 4);
             for(var i=0;i<es.length;i++){
-                lines.push('M' + i + ': ' + es[i].key + ': ' + es[i].err.substring(0,70));
+                lines.push('M' + i + ': ' + es[i].key + ': ' + es[i].err.substring(0,60));
             }
         }
         if(w._wbExtra) lines.push(w._wbExtra);
