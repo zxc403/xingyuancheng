@@ -899,7 +899,15 @@
             if(!window._modelErrors) window._modelErrors = [];
             window._modelErrors.push({ key: 'KTX2_SETUP', err: e.message||String(e), url: '' });
         }
+        // v6.12.1 修：把玩家 Xbot 从角色列表里挑出来放到最前面，确保玩家模型优先加载、最快出现
+        const charLoadList = (typeof exportCharLoadList === 'function')
+            ? exportCharLoadList()
+            : (function(){ if(!window._modelErrors) window._modelErrors=[]; window._modelErrors.push({key:'CHARREG_MISSING',err:'exportCharLoadList not function',url:''}); return []; })();
+        const xbotIdx = charLoadList.findIndex(c => c.key === 'char_xbot');
+        const xbotItem = xbotIdx >= 0 ? charLoadList.splice(xbotIdx, 1)[0] : null;
+
         const list = [
+            ...(xbotItem ? [xbotItem] : []),
             { key: 'building_city', url: 'assets/models/buildings/city_building.glb?v=4' },
             { key: 'building_block', url: 'assets/models/buildings/city_block.glb?v=4' },
             // 车辆（v6.2 修：磁盘上是 car1_truck.glb / car2_dragster.glb / car3_minivan.glb / cars_big_set.glb）
@@ -928,8 +936,7 @@
             { key: 'scene_cyberpunk', url: 'assets/models/scenes/cyberpunk_city.glb?v=4' },
             // 角色（v6.11.0: 从 CharacterRegistry 注册表批量生成，18 个角色）
             //     删字符硬编码，所有新增角色走 src/entities/CharacterRegistry.js
-            // v6.11.5: 安全展开（exportCharLoadList 可能 undefined，spread 会抛错吞掉整个 loadRealModels）
-            ...((typeof exportCharLoadList === 'function') ? exportCharLoadList() : (function(){ if(!window._modelErrors) window._modelErrors=[]; window._modelErrors.push({key:'CHARREG_MISSING',err:'exportCharLoadList not function',url:''}); return []; })()),
+            ...charLoadList,
             // v6.2 新增：道具（用于替换 pickup/glow/摊位）
             { key: 'prop_chest',       url: 'assets/models/props/chest.glb?v=4' },
             { key: 'prop_coin',        url: 'assets/models/props/coin_stack_medium.gltf.glb?v=4' },
