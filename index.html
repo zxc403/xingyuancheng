@@ -1022,29 +1022,39 @@
     // 在 _realModels 加载完成后调用一次，把 GLB clone + AnimationMixer 挂到 player
     function createPlayerMesh() {
         // v6.10.3: 委托给 Player 模块（保留函数名做兼容）
-        // v6.12.2: 增加兜底：如果 Player.spawn 因 IK/Avatar 等子系统抛错导致 mesh 为空，
-        //           直接用 _realModels['char_xbot'] 创建 mesh 并同步给本地 player，保证渲染循环能看到
+        // v6.12.4: 改用 Player._spawnFallback 作为最终兜底，不再手动 clone + 重算 bbox，
+        //          避免出现"贴脸巨人"问题（之前手动算 scale/position 容易把模型放到奇怪位置）
         if (window.__game && window.__game.player) {
             try {
                 window.__game.player.spawn(scene);
             } catch (e) {
                 console.error('[createPlayerMesh] Player.spawn 抛错:', e);
             }
-            if (!window.__game.player.mesh && window._realModels && window._realModels['char_xbot']) {
-                console.warn('[createPlayerMesh] Player.spawn 未产出 mesh，手动用 char_xbot 兜底');
+            if (!window.__game.player.mesh) {
+                console.warn('[createPlayerMesh] Player.spawn 未产出 mesh，强制调用 _spawnFallback（胶囊）');
                 try {
-                    const charG = window._realModels['char_xbot'].clone(true);
-                    const box = new THREE.Box3().setFromObject(charG);
-                    const size = new THREE.Vector3(); box.getSize(size);
-                    const s = 1.7 / size.y;
-                    charG.scale.set(s, s, s);
-                    const center = new THREE.Vector3(); box.getCenter(center);
-                    charG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
-                    charG.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-                    scene.add(charG);
-                    window.__game.player.mesh = charG;
+                    if (typeof window.__game.player._spawnFallback === 'function') {
+                        window.__game.player._spawnFallback(scene);
+                    } else {
+                        // 兜底：本地胶囊
+                        const fb = new THREE.Group();
+                        const body = new THREE.Mesh(
+                            new THREE.CapsuleGeometry(0.28, 0.7, 4, 12),
+                            new THREE.MeshStandardMaterial({ color: 0x4488cc, roughness: 0.5, metalness: 0.1 })
+                        );
+                        body.position.y = 0.9; body.castShadow = true;
+                        fb.add(body);
+                        const head = new THREE.Mesh(
+                            new THREE.SphereGeometry(0.18, 12, 8),
+                            new THREE.MeshStandardMaterial({ color: 0xe8c8a0, roughness: 0.6 })
+                        );
+                        head.position.y = 1.65; head.castShadow = true;
+                        fb.add(head);
+                        scene.add(fb);
+                        window.__game.player.mesh = fb;
+                    }
                 } catch (e2) {
-                    console.error('[createPlayerMesh] 手动兜底也失败:', e2);
+                    console.error('[createPlayerMesh] _spawnFallback 也失败:', e2);
                 }
             }
             // 同步 Player 模块的 mesh 到本地 player（index.html updatePlayer 渲染循环用）
