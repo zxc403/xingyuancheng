@@ -622,7 +622,7 @@
                 tasks.push((async () => {
                     try {
                         const url = `assets/textures/${setName}_${ch}.jpg`;
-                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 8000);
+                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 30000);
                         if (ch === 'diff') {
                             t.colorSpace = THREE.SRGBColorSpace;
                             tex.map = t;
@@ -925,7 +925,7 @@
             try {
                 const gltf = await Promise.race([
                     loader.loadAsync(it.url),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000))
                 ]);
                 const obj = gltf.scene || gltf.scenes[0];
                 // 自动遍历启用阴影 + 调整材质到 MeshStandardMaterial
@@ -4557,7 +4557,7 @@
                     console.warn('[Init] real HDR failed, use procedural sky', e);
                     return null;
                 }),
-                new Promise(res => setTimeout(() => { console.warn('[Init] HDR timeout (8s), use procedural sky'); res(null); }, 8000))
+                new Promise(res => setTimeout(() => { console.warn('[Init] HDR timeout (30s), use procedural sky'); res(null); }, 30000))
             ]);
             if (realHDR) scene.environment = realHDR;
             window._realHDR = realHDR;
