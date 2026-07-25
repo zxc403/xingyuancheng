@@ -834,6 +834,24 @@
         });
     }
 
+    // ---- 并发池（v6.12.0 修） ----
+    // 限制同时下载数量，避免移动网络下同域名 6 连接槽被抢光导致全部 timeout
+    async function asyncPool(concurrency, iterable, iteratorFn) {
+        const ret = [];
+        const executing = new Set();
+        for (const item of iterable) {
+            const p = Promise.resolve().then(() => iteratorFn(item, iterable));
+            ret.push(p);
+            executing.add(p);
+            const clean = () => executing.delete(p);
+            p.then(clean).catch(clean);
+            if (executing.size >= concurrency) {
+                await Promise.race(executing);
+            }
+        }
+        return Promise.allSettled(ret);
+    }
+
     // ---- 真实 GLB 模型加载器（v6.1 新增） ----
     // 加载建筑/车辆/角色真模型，缓存到 window._realModels
     async function loadRealModels() {
@@ -920,12 +938,12 @@
             { key: 'prop_table',       url: 'assets/models/props/table_small_decorated_B.gltf.glb?v=4' },
         ];
         window.__stage = 'LIST_BUILT';
-        // v6.2 改：并发加载（之前是串行，5 个角色 GLB 每个 3.5M 串行要 8+ 秒）
-        const tasks = list.map(it => (async () => {
+        // v6.12.0 修：并发池限制 3 个，避免移动网络下 6 连接槽被抢光导致全部 timeout
+        await asyncPool(3, list, async (it) => {
             try {
                 const gltf = await Promise.race([
                     loader.loadAsync(it.url),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000))
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 45000))
                 ]);
                 const obj = gltf.scene || gltf.scenes[0];
                 // 自动遍历启用阴影 + 调整材质到 MeshStandardMaterial
@@ -966,8 +984,7 @@
                 if (!window._modelErrors) window._modelErrors = [];
                 window._modelErrors.push({ key: it.key, err: e.message || String(e), url: it.url });
             }
-        })());
-        await Promise.allSettled(tasks);
+        });
         window.__stage = 'ALL_DONE';
         return window._realModels;
         } catch(e) {
@@ -4702,7 +4719,7 @@
         ];
         if(w._lastErr) lines.push('ERR: ' + w._lastErr.substring(0,60));
         if(w._modelErrors && w._modelErrors.length) {
-            var es = w._modelErrors.slice(0, 4);
+            var es = w._modelErrors.slice(0, 10);
             for(var i=0;i<es.length;i++){
                 lines.push('M' + i + ': ' + es[i].key + ': ' + es[i].err.substring(0,60));
             }
