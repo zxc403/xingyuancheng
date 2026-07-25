@@ -12,7 +12,8 @@
     (function(){
         try {
             window._isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 2.0) : Math.min(window.devicePixelRatio||1, 2);
+            // v6.12.2: 移动端限制 pixel ratio 到 1.5，减少 GPU 负担提升 FPS
+            window._pixelRatio = window._isMobile ? Math.min(window.devicePixelRatio||1, 1.5) : Math.min(window.devicePixelRatio||1, 2);
             // 拦截未处理的 Promise 拒绝 → 不再触发 Chromium 红条
             window.addEventListener('unhandledrejection', function(e){
                 console.warn('[v6.7.1] unhandled promise:', e.reason && (e.reason.message||e.reason));
@@ -512,7 +513,7 @@
     if (isMobile) shadowQuality = 1024;
     // v6.12 (M3.1): 画质档位 0=low 1=med 2=high 3=ultra
     // 决定 bloom 强度 / SSAO 半径 / 阴影大小 / pixel ratio
-    let qualityPreset = (isMobile ? 2 : 2);  // v6.10.7 (WB): 移动端也默认高质（82 FPS 设备有余量，F4/自动降级兜底）
+    let qualityPreset = (isMobile ? 1 : 2);  // v6.12.2: 移动端默认均衡，避免 25 FPS 卡顿
     // 用户可手动改（通过 ? 帮派面板或快捷键 F4）
     const QUALITY_PRESETS = {
         0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.4, ssao: false,  ssaoRadius: 0.0, post: false },
@@ -1014,8 +1015,36 @@
     // 在 _realModels 加载完成后调用一次，把 GLB clone + AnimationMixer 挂到 player
     function createPlayerMesh() {
         // v6.10.3: 委托给 Player 模块（保留函数名做兼容）
+        // v6.12.2: 增加兜底：如果 Player.spawn 因 IK/Avatar 等子系统抛错导致 mesh 为空，
+        //           直接用 _realModels['char_xbot'] 创建 mesh 并同步给本地 player，保证渲染循环能看到
         if (window.__game && window.__game.player) {
-            window.__game.player.spawn(scene);
+            try {
+                window.__game.player.spawn(scene);
+            } catch (e) {
+                console.error('[createPlayerMesh] Player.spawn 抛错:', e);
+            }
+            if (!window.__game.player.mesh && window._realModels && window._realModels['char_xbot']) {
+                console.warn('[createPlayerMesh] Player.spawn 未产出 mesh，手动用 char_xbot 兜底');
+                try {
+                    const charG = window._realModels['char_xbot'].clone(true);
+                    const box = new THREE.Box3().setFromObject(charG);
+                    const size = new THREE.Vector3(); box.getSize(size);
+                    const s = 1.7 / size.y;
+                    charG.scale.set(s, s, s);
+                    const center = new THREE.Vector3(); box.getCenter(center);
+                    charG.position.set(-center.x * s, -box.min.y * s, -center.z * s);
+                    charG.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+                    scene.add(charG);
+                    window.__game.player.mesh = charG;
+                } catch (e2) {
+                    console.error('[createPlayerMesh] 手动兜底也失败:', e2);
+                }
+            }
+            // 同步 Player 模块的 mesh 到本地 player（index.html updatePlayer 渲染循环用）
+            if (window.__game.player.mesh && typeof player !== 'undefined') {
+                player.mesh = window.__game.player.mesh;
+                console.log('[createPlayerMesh] player.mesh 已同步, type=', player.mesh.type || 'Group');
+            }
         }
         // v6.11.0 (M2.5): 实例化并绑定 Avatar 面板
         if (window.AvatarPanel && !window.__avatarPanel) {
@@ -3995,7 +4024,7 @@
             sun.position.set(-80,120,-60);
         }
         sun.castShadow = true;
-        sun.shadow.mapSize.set(2048, 2048);   // 移动端 2048，PC 端 4096 在 updateFPS 里提
+        sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);   // v6.12.2: 移动端降阴影分辨率提 FPS
         sun.shadow.camera.near=1; sun.shadow.camera.far=500;
         sun.shadow.camera.left=-250; sun.shadow.camera.right=250;
         sun.shadow.camera.top=250; sun.shadow.camera.bottom=-250;
