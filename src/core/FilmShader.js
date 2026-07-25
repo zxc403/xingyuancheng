@@ -38,6 +38,9 @@ const FilmShader = {
         uniform float uVignette;
         uniform float uGrain;
         uniform float uFxaa;
+        // v6.11.6 (WB): 之前缺这两个 uniform 声明，ShaderPass 初始化炸导致 LOAD_REAL_FATAL
+        uniform float uChroma;
+        uniform float uSharp;
         varying vec2 vUv;
 
         // FXAA 简化版（基于 luma edge detection）
