@@ -109,6 +109,11 @@
     let ambient, sun, hemi;
     let composer, outputPass, ssaoPass;
 
+    // ---- 日夜循环状态 ----
+    let dayCycleTime = 300; // 秒/完整循环
+    let dayProgress = 0.42; // 起始接近正午
+    let dayCycleSpeed = 1.0; // 倍速
+
     // ---- 玩家 ----
     const player = {
         pos: new THREE.Vector3(0, 1.7, 30),
@@ -481,9 +486,11 @@
         const fill = new THREE.DirectionalLight(0x6688c0, 0.55);
         fill.position.set(80, 60, 80);
         scene.add(fill);
+        window._fill = fill;
         const rim = new THREE.DirectionalLight(0xc9a96e, 0.35);
         rim.position.set(0, 20, -120);
         scene.add(rim);
+        window._rim = rim;
 
         // 后处理
         if (isMobile) {
@@ -1201,6 +1208,8 @@
     function buildStreetFurniture() {
         const furnGroup = new THREE.Group();
         furnGroup.name = 'streetFurniture';
+        window._streetLights = [];
+        window._lampMats = [];
 
         // 路灯几何复用
         const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, 6, 8);
@@ -1208,6 +1217,7 @@
         const lampGeo = new THREE.SphereGeometry(0.35, 8, 6);
         const poleMat = new THREE.MeshStandardMaterial({color:0x333333, roughness:0.4, metalness:0.8});
         const lampMat = new THREE.MeshStandardMaterial({color:0xffeedd, roughness:0.3, metalness:0.2, emissive:0x332211, emissiveIntensity:0.5});
+        window._lampMats.push(lampMat);
 
         // 树几何复用
         const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 3, 6);
@@ -1255,6 +1265,7 @@
                         const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
                         pt.position.copy(lamp.position);
                         furnGroup.add(pt);
+                        window._streetLights.push(pt);
                     }
                 }
             }
@@ -1293,6 +1304,102 @@
         scene.add(furnGroup);
         window._furnGroup = furnGroup;
         return furnGroup.children.length;
+    }
+
+    // ---- 日夜循环 ----
+    function updateDayNight(t) {
+        const twoPI = Math.PI * 2;
+        const sunPhase = t * twoPI;
+        const sunElev = Math.sin(sunPhase);
+        const sunAzimuth = sunPhase;
+
+        // 太阳位置（球坐标 → 笛卡尔）
+        const sunDist = 200;
+        const cosElev = Math.cos(Math.asin(sunElev));
+        const sunX = cosElev * Math.sin(sunAzimuth) * sunDist;
+        const sunY = sunElev * sunDist;
+        const sunZ = cosElev * Math.cos(sunAzimuth) * sunDist;
+
+        // dayness: 1=正午, 0=深夜
+        const rawDay = sunElev * 1.25 + 0.38;
+        const dayness = U.clamp(rawDay, 0.0, 1.0);
+
+        // 太阳颜色: 正午偏白, 近地平线偏暖
+        const sunHue = 0.12;
+        const sunSat = 0.4 + dayness * 0.5;
+        const sunLit = 0.5 + dayness * 0.5;
+        const sunC = `hsl(${sunHue*360}, ${(sunSat*100).toFixed(0)}%, ${(sunLit*100).toFixed(0)}%)`;
+
+        // ---- 天空穹顶 ----
+        if (window._skyDome) {
+            const u = window._skyDome.material.uniforms;
+            u.uDayness.value = dayness;
+            u.uSunDirection.value.set(sunX, sunY, sunZ).normalize();
+            u.uSunColor.value.setStyle(sunC);
+            u.uZenithColor.value.set(
+                0.04 + 0.16 * dayness,
+                0.08 + 0.42 * dayness,
+                0.25 + 0.65 * dayness
+            );
+            u.uHorizonColor.value.set(
+                0.08 + 0.72 * dayness,
+                0.12 + 0.73 * dayness,
+                0.18 + 0.72 * dayness
+            );
+        }
+
+        // ---- 主太阳光 ----
+        if (sun) {
+            sun.position.set(sunX, sunY, sunZ);
+            sun.intensity = 0.1 + dayness * 2.9;
+            sun.color.setStyle(sunC);
+        }
+
+        // ---- 环境光 ----
+        if (ambient) {
+            ambient.intensity = 0.08 + dayness * 0.37;
+            ambient.color.setRGB(0.18 + 0.62 * dayness, 0.12 + 0.63 * dayness, 0.28 + 0.47 * dayness);
+        }
+
+        // ---- 半球光 ----
+        if (hemi) {
+            hemi.intensity = 0.1 + dayness * 0.5;
+            hemi.color.setRGB(0.28 + 0.62 * dayness, 0.32 + 0.58 * dayness, 0.38 + 0.52 * dayness);
+            hemi.groundColor.setRGB(0.08 + 0.17 * dayness, 0.04 + 0.13 * dayness, 0.02 + 0.08 * dayness);
+        }
+
+        // ---- 补光/轮廓光 ----
+        if (window._fill) {
+            window._fill.intensity = 0.08 + dayness * 0.47;
+        }
+        if (window._rim) {
+            window._rim.intensity = 0.05 + dayness * 0.30;
+        }
+
+        // ---- 雾 ----
+        if (scene.fog) {
+            const f = dayness;
+            scene.fog.color.setRGB(0.08 + 0.47 * f, 0.10 + 0.50 * f, 0.13 + 0.57 * f);
+        }
+
+        // ---- 路灯亮灭 ----
+        const nightMode = dayness < 0.32;
+        if (window._streetLights) {
+            for (const pt of window._streetLights) {
+                pt.intensity = nightMode ? 8 : 0.04;
+                pt.visible = dayness < 0.45;
+            }
+        }
+        if (window._lampMats) {
+            for (const m of window._lampMats) {
+                m.emissiveIntensity = nightMode ? 1.8 : 0.15;
+            }
+        }
+
+        // ---- IBL 强度 ----
+        if (scene.environment && scene.environmentIntensity !== undefined) {
+            scene.environmentIntensity = 0.15 + dayness * 0.85;
+        }
     }
 
     // 雾层设置
@@ -1410,6 +1517,8 @@
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
         setupFog();
+        // 初始日夜状态（正午附近）
+        updateDayNight(dayProgress);
 
         // PBR 展示圈 - 测试材质
         if (window._realTex) {
@@ -1491,6 +1600,12 @@
     function initInput() {
         window.addEventListener('keydown', e => { keys[e.code] = true; });
         window.addEventListener('keyup', e => { keys[e.code] = false; });
+        // 日夜循环快捷键: [ 减速, ] 加速, \ 暂停/恢复
+        window.addEventListener('keydown', e => {
+            if (e.code === 'BracketLeft') { dayCycleSpeed = Math.max(0.1, dayCycleSpeed - 0.5); }
+            if (e.code === 'BracketRight') { dayCycleSpeed = Math.min(10.0, dayCycleSpeed + 0.5); }
+            if (e.code === 'Backslash') { dayCycleSpeed = dayCycleSpeed > 0.05 ? 0 : 1.0; }
+        });
         document.addEventListener('mousemove', e => {
             if (isPointerLocked && gameStarted) {
                 player.yaw -= e.movementX * 0.002;
@@ -1520,6 +1635,10 @@
 
         if (gameStarted && !gamePaused) {
             updatePlayer(dt);
+            // 日夜循环推进
+            dayProgress += dt / dayCycleTime * dayCycleSpeed;
+            if (dayProgress >= 1.0) dayProgress -= 1.0;
+            updateDayNight(dayProgress);
         }
         updateCamera();
 
@@ -1532,8 +1651,11 @@
         if (composer) composer.render();
         else if (renderer) renderer.render(scene, camera);
 
-        // 显示 FPS
-        document.getElementById('info').textContent = `v7.0 | FPS: ${Math.round(1/dt)}`;
+        // 显示 FPS + 日夜
+        const hours = Math.floor(dayProgress * 24);
+        const mins = Math.floor((dayProgress * 24 - hours) * 60);
+        const cycleLabel = dayCycleSpeed !== 1 ? ` x${dayCycleSpeed.toFixed(1)}` : '';
+        document.getElementById('info').textContent = `v7.0 | FPS: ${Math.round(1/dt)} | ${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}${cycleLabel}`;
     }
 
     // ---- 启动 ----
@@ -1621,6 +1743,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
