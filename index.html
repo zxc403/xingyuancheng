@@ -1038,9 +1038,20 @@
             for (const seg of segments) {
                 const geo = new THREE.BoxGeometry(seg.w, seg.h, seg.d);
                 const color = dp.colors[seg.colorIdx % dp.colors.length];
-                const mat = new THREE.MeshStandardMaterial({
-                    color, roughness:0.6, metalness:0.3,
-                });
+                const matOpts = {color, roughness:0.6, metalness:0.3};
+                // P5: 应用立面窗格纹理
+                const fTex = facadeTextures[dist];
+                if (fTex) {
+                    matOpts.map = fTex;
+                    // 让纹理在建筑立面上正确重复
+                    const repH = Math.max(1, Math.floor(seg.h / 4));
+                    const repW = Math.max(1, Math.floor(Math.max(seg.w, seg.d) / 3));
+                    const repTex = fTex.clone();
+                    repTex.needsUpdate = true;
+                    repTex.repeat.set(repW, repH);
+                    matOpts.map = repTex;
+                }
+                const mat = new THREE.MeshStandardMaterial(matOpts);
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.set(cx, accumY + seg.h/2, cz);
                 mesh.castShadow = true;
@@ -1089,7 +1100,254 @@
         return bldGroup.children.length;
     }
 
-    // ---- 构建世界（P1+P2+P3+P4: 地形 + 路网 + 地块 + 建筑） ----
+    // ===== P5: 立面纹理 + 街道家具 + 雾层 =====
+    // Canvas 窗格纹理生成
+    const facadeTextures = {};
+
+    function generateFacadeTexture(district) {
+        const size = 256;
+        const cv = document.createElement('canvas');
+        cv.width = size; cv.height = size;
+        const ctx = cv.getContext('2d');
+
+        let bgColor, winColor, winDensity, winGlow, winShape;
+
+        switch(district) {
+        case 'A': // 上城CBD - 蓝灰玻璃幕墙，密集亮窗
+            bgColor='#3a4455'; winColor='#8899cc'; winDensity=0.75; winGlow='#aaccff'; winShape='tall';
+            break;
+        case 'B': // 中城商住 - 米色墙面，中密暖黄窗
+            bgColor='#c4b898'; winColor='#ffe8a0'; winDensity=0.50; winGlow='#ffcc66'; winShape='square';
+            break;
+        case 'C': // 下城工业 - 深灰墙面，稀疏大窗+横条
+            bgColor='#4a3f35'; winColor='#998877'; winDensity=0.30; winGlow='#665544'; winShape='wide';
+            break;
+        case 'D': // 河岸 - 浅褐墙面，中等方窗
+        default:
+            bgColor='#a89880'; winColor='#eeddbb'; winDensity=0.45; winGlow='#ddaa66'; winShape='square';
+            break;
+        }
+
+        // 背景墙色
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, size, size);
+
+        // 水平楼层线
+        ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+        ctx.lineWidth = 1;
+        for (let y=0; y<size; y+=size/12) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y); ctx.stroke();
+        }
+
+        // 垂直柱线
+        ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+        for (let x=0; x<size; x+=size/8) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, size); ctx.stroke();
+        }
+
+        // 窗户
+        const gap = 4;
+        const floorH = Math.floor(size / 12);
+        const colW = Math.floor(size / 8);
+        for (let row=0; row<12; row++) {
+            for (let col=0; col<8; col++) {
+                if (Math.random() > winDensity) continue;
+                const wx = col*colW + gap, wy = row*floorH + gap;
+                let ww, wh;
+                if (winShape==='tall')   { ww=colW*0.55; wh=floorH*0.75; }
+                else if (winShape==='wide') { ww=colW*0.75; wh=floorH*0.45; }
+                else { ww=colW*0.50; wh=floorH*0.55; }
+
+                // 窗框
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fillRect(wx-1, wy-1, ww+2, wh+2);
+                // 窗玻璃
+                const lit = Math.random() < 0.7;
+                ctx.fillStyle = lit ? winGlow : winColor;
+                ctx.fillRect(wx, wy, ww, wh);
+                // 窗格十字
+                ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(wx+ww/2, wy); ctx.lineTo(wx+ww/2, wy+wh); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(wx, wy+wh/2); ctx.lineTo(wx+ww, wy+wh/2); ctx.stroke();
+            }
+        }
+
+        // CBD 额外：反光条纹
+        if (district==='A') {
+            for (let i=0; i<4; i++) {
+                const sx = 30 + i*60;
+                const grad = ctx.createLinearGradient(sx, 0, sx+18, 0);
+                grad.addColorStop(0, 'rgba(255,255,255,0)');
+                grad.addColorStop(0.4, 'rgba(200,220,255,0.25)');
+                grad.addColorStop(0.6, 'rgba(200,220,255,0.25)');
+                grad.addColorStop(1, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(sx, 0, 18, size);
+            }
+        }
+
+        const tex = new THREE.CanvasTexture(cv);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.generateMipmaps = true;
+        return tex;
+    }
+
+    // 街道家具放置
+    function buildStreetFurniture() {
+        const furnGroup = new THREE.Group();
+        furnGroup.name = 'streetFurniture';
+
+        // 路灯几何复用
+        const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, 6, 8);
+        const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.8, 6);
+        const lampGeo = new THREE.SphereGeometry(0.35, 8, 6);
+        const poleMat = new THREE.MeshStandardMaterial({color:0x333333, roughness:0.4, metalness:0.8});
+        const lampMat = new THREE.MeshStandardMaterial({color:0xffeedd, roughness:0.3, metalness:0.2, emissive:0x332211, emissiveIntensity:0.5});
+
+        // 树几何复用
+        const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 3, 6);
+        const leafGeo1 = new THREE.SphereGeometry(1.5, 8, 5);
+        const leafGeo2 = new THREE.SphereGeometry(1.0, 8, 5);
+        const trunkMat = new THREE.MeshStandardMaterial({color:0x5c3a1e, roughness:0.8});
+        const leafMat = new THREE.MeshStandardMaterial({color:0x3a6b2a, roughness:0.7});
+
+        const lampInterval = 28;
+        const treeInterval = 22;
+
+        for (const s of roadSegments) {
+            const dx = s.x2-s.x1, dz = s.z2-s.z1;
+            const len = Math.sqrt(dx*dx+dz*dz);
+            if (len < 10) continue;
+            const nx = -dz/len, nz = dx/len;
+            const isArterial = s.w >= 7;
+
+            // 路灯（主干道两侧）
+            if (isArterial) {
+                const steps = Math.floor(len / lampInterval);
+                for (let i=1; i<steps; i++) {
+                    const t = i/steps;
+                    const px = s.x1+dx*t, pz = s.z1+dz*t;
+                    for (const side of [-1, 1]) {
+                        const ox = px + nx * side * (s.w*0.5 + 1.5);
+                        const oz = pz + nz * side * (s.w*0.5 + 1.5);
+                        const gh = getTerrainH(ox, oz);
+
+                        const pole = new THREE.Mesh(poleGeo, poleMat);
+                        pole.position.set(ox, gh+3, oz);
+                        pole.castShadow = true;
+                        furnGroup.add(pole);
+
+                        const arm = new THREE.Mesh(armGeo, poleMat);
+                        arm.rotation.z = Math.PI/2;
+                        arm.position.set(ox + nx*side*0.9, gh+5.8, oz + nz*side*0.9);
+                        furnGroup.add(arm);
+
+                        const lamp = new THREE.Mesh(lampGeo, lampMat);
+                        lamp.position.set(ox + nx*side*1.7, gh+5.8, oz + nz*side*1.7);
+                        furnGroup.add(lamp);
+
+                        // 点光源
+                        const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
+                        pt.position.copy(lamp.position);
+                        furnGroup.add(pt);
+                    }
+                }
+            }
+
+            // 树木（所有道路两侧）
+            const tSteps = Math.floor(len / treeInterval);
+            for (let i=1; i<tSteps; i++) {
+                const px = s.x1+dx*(i/tSteps), pz = s.z1+dz*(i/tSteps);
+                const side = i%2===0 ? 1 : -1;
+                const ox = px + nx*side*(s.w*0.5 + 2.5 + Math.sin(i*2.3)*0.6);
+                const oz = pz + nz*side*(s.w*0.5 + 2.5 + Math.sin(i*2.3)*0.6);
+                const gh = getTerrainH(ox, oz);
+
+                const tree = new THREE.Group();
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.y = 1.5;
+                trunk.castShadow = true;
+                tree.add(trunk);
+
+                const leaf1 = new THREE.Mesh(leafGeo1, leafMat);
+                leaf1.position.y = 3.5;
+                leaf1.castShadow = true;
+                tree.add(leaf1);
+
+                const leaf2 = new THREE.Mesh(leafGeo2, leafMat);
+                leaf2.position.y = 5.0;
+                leaf2.castShadow = true;
+                tree.add(leaf2);
+
+                tree.position.set(ox, gh, oz);
+                tree.scale.setScalar(0.7 + Math.sin(i*1.7)*0.3);
+                furnGroup.add(tree);
+            }
+        }
+
+        scene.add(furnGroup);
+        window._furnGroup = furnGroup;
+        return furnGroup.children.length;
+    }
+
+    // 雾层设置
+    function setupFog() {
+        // 场景全局雾
+        scene.fog = new THREE.Fog(0x8899aa, 120, 450);
+
+        // 盆地低空雾平面
+        const fogGeo = new THREE.PlaneGeometry(500, 500);
+        fogGeo.rotateX(-Math.PI/2);
+        const fogMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: {value:0},
+                uColor: {value:new THREE.Color(0x8899bb)},
+                uFogColor: {value:new THREE.Color(0x8899aa)},
+            },
+            vertexShader: `
+                varying vec3 vPos;
+                varying vec2 vUv;
+                void main() {
+                    vec4 wp = modelMatrix * vec4(position,1.0);
+                    vPos = wp.xyz;
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vPos;
+                varying vec2 vUv;
+                uniform vec3 uColor;
+                uniform vec3 uFogColor;
+                void main() {
+                    float dist = length(vPos.xz) * 0.004;
+                    float alpha = smoothstep(0.0, 0.35, dist) * smoothstep(1.2, 0.25, dist) * 0.28;
+                    float edgeFade = smoothstep(230.0, 250.0, length(vPos.xz)) * (1.0-smoothstep(0.0, 30.0, length(vPos.xz)));
+                    alpha *= edgeFade;
+                    // 盆地中心更浓
+                    float basin = 1.0 - smoothstep(0.0, 120.0, dist*250.0) * 0.4;
+                    alpha *= basin;
+                    gl_FragColor = vec4(mix(uFogColor, uColor, 0.6), alpha);
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            depthTest: true,
+        });
+        const fogPlane = new THREE.Mesh(fogGeo, fogMat);
+        fogPlane.position.y = 1.5;
+        fogPlane.renderOrder = 10;
+        fogPlane.name = 'groundFog';
+        scene.add(fogPlane);
+        window._fogPlane = fogPlane;
+    }
+
+    // ---- 构建世界（P1+P2+P3+P4+P5: 地形 + 路网 + 地块 + 建筑 + 立面/家具/雾） ----
     function buildWorld() {
         // Simplex Noise 地形
         const terrainSize = 500, terrainSeg = 200;
@@ -1140,8 +1398,18 @@
         renderPlots();
 
         // ---- P4: 建筑生成 ----
+        // P5: 预生成立面纹理
+        facadeTextures['A'] = generateFacadeTexture('A');
+        facadeTextures['B'] = generateFacadeTexture('B');
+        facadeTextures['C'] = generateFacadeTexture('C');
+        facadeTextures['D'] = generateFacadeTexture('D');
         const bldCount = buildBuildings();
         console.log(`[P4] 建筑: ${bldCount} 个网格体`);
+
+        // ---- P5: 街道家具 + 雾层 ----
+        const furnCount = buildStreetFurniture();
+        console.log(`[P5] 街道家具: ${furnCount} 个对象`);
+        setupFog();
 
         // PBR 展示圈 - 测试材质
         if (window._realTex) {
@@ -1353,6 +1621,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
