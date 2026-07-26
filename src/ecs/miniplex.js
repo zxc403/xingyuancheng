@@ -59,6 +59,13 @@ export class Bucket {
     get size() { return this._entities.length; }
     get first() { return this._entities[0]; }
 
+    each(fn) {
+        for (const entity of this) {
+            fn(entity._id, entity);
+        }
+        return this;
+    }
+
     [Symbol.iterator]() {
         let index = this._entities.length;
         return {
@@ -203,7 +210,10 @@ export class World extends Bucket {
         this._nextId = 0;
 
         // 实体增删时自动 reindex
-        this.onEntityAdded.subscribe(e => this._reindex(e));
+        this.onEntityAdded.subscribe(e => {
+            this._assignId(e);
+            this._reindex(e);
+        });
         this.onEntityRemoved.subscribe(e => {
             for (const q of this._queries) q.remove(e);
             if (this._entityToId.has(e)) {
@@ -252,6 +262,15 @@ export class World extends Bucket {
     }
 
     // --- Entity ID ---
+    _assignId(entity) {
+        if (!this._entityToId.has(entity)) {
+            const id = this._nextId++;
+            entity._id = id;
+            this._entityToId.set(entity, id);
+            this._idToEntity.set(id, entity);
+        }
+    }
+
     id(entity) {
         if (!this.has(entity)) return undefined;
         if (!this._entityToId.has(entity)) {
