@@ -606,10 +606,17 @@
     // v6.1: 扩展到 8 套 (4 套 2K 原 + 4 套 4K 新)
     // v6.7.1: 移动端只加载 4 套核心；每张 8s 超时；失败走 canvas 程序化纹理兜底
     async function loadRealTextures() {
-        const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron'];
-        // 移动端只保留 4 套最常用，减少并发数 + 节省流量
-        const sets = (window._isMobile) ? ['asphalt', 'plank', 'rocky', 'concrete'] : allSets;
-        const chs = ['diff', 'nor', 'rough'];  // v6.1: AO 缺失会 fall through
+        const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron', 'paving'];
+        // 移动端只保留 5 套最常用，减少并发数 + 节省流量
+        const sets = (window._isMobile) ? ['asphalt', 'plank', 'rocky', 'concrete', 'paving'] : allSets;
+        // v6.14: 新格式使用子目录 + 标准化命名 (color/normal/roughness/ao.jpg)
+        const chMap = {
+            diff:  { file: 'color.jpg',     setFn: (t,tex)=>{ t.colorSpace=THREE.SRGBColorSpace; tex.map=t; } },
+            nor:   { file: 'normal.jpg',    setFn: (t,tex)=>{ tex.normalMap=t; } },
+            rough: { file: 'roughness.jpg', setFn: (t,tex)=>{ tex.roughnessMap=t; } },
+            ao:    { file: 'ao.jpg',        setFn: (t,tex)=>{ tex.aoMap=t; } }
+        };
+        const chs = ['diff', 'nor', 'rough', 'ao'];
         const out = {};
         // v6.2: 并发加载（消除 23 次额外 RTT，首屏 -30%）
         // v6.7.1: 加 8s 超时 + 全失败兜底
@@ -622,25 +629,16 @@
             const tex = { map: null, normalMap: null, roughnessMap: null, aoMap: null };
             out[setName] = tex;
             for (const ch of chs) {
+                const chDef = chMap[ch];
                 tasks.push((async () => {
                     try {
-                        const url = `assets/textures/${setName}_${ch}.jpg`;
+                        const url = `assets/textures/${setName}/${chDef.file}`;
                         const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 30000);
-                        if (ch === 'diff') {
-                            t.colorSpace = THREE.SRGBColorSpace;
-                            tex.map = t;
-                        } else if (ch === 'nor') {
-                            tex.normalMap = t;
-                        } else if (ch === 'rough') {
-                            tex.roughnessMap = t;
-                        } else if (ch === 'ao') {
-                            tex.aoMap = t;
-                        }
+                        chDef.setFn(t, tex);
                         t.wrapS = t.wrapT = THREE.RepeatWrapping;
                         t.anisotropy = 8;
                         t.repeat.set(2, 2);
                     } catch (e) {
-                        // v6.7.1: 静默失败，不向上抛 → 杜绝 Chromium 红条
                         console.warn(`[RealTexture] fallback ${setName}/${ch}`, e && e.message);
                     }
                 })());
@@ -1284,10 +1282,13 @@
 
     // 真实 PBR 纹理（从 Poly Haven 加载）
     // 如果加载成功，buildWorld 会自动用真纹理替换程序纹理
-    const REAL_TEX_ROAD   = () => (window._realTex && window._realTex.asphalt) ? window._realTex.asphalt : texRoad;
-    const REAL_TEX_GRASS  = () => (window._realTex && window._realTex.forest)  ? window._realTex.forest  : texGrass;
-    const REAL_TEX_PLANK  = () => (window._realTex && window._realTex.plank)   ? window._realTex.plank   : texWood;
-    const REAL_TEX_ROCKY  = () => (window._realTex && window._realTex.rocky)   ? window._realTex.rocky   : texStone;
+    const REAL_TEX_ROAD   = () => (window._realTex && window._realTex.asphalt)  ? window._realTex.asphalt  : texRoad;
+    const REAL_TEX_GRASS  = () => (window._realTex && window._realTex.forest)   ? window._realTex.forest   : texGrass;
+    const REAL_TEX_PLANK  = () => (window._realTex && window._realTex.plank)    ? window._realTex.plank    : texWood;
+    const REAL_TEX_ROCKY  = () => (window._realTex && window._realTex.rocky)    ? window._realTex.rocky    : texStone;
+    const REAL_TEX_BRICK  = () => (window._realTex && window._realTex.brick)    ? window._realTex.brick    : texBrick;
+    const REAL_TEX_CONCRETE = () => (window._realTex && window._realTex.concrete) ? window._realTex.concrete : texStone;
+    const REAL_TEX_PAVING = () => (window._realTex && window._realTex.paving)   ? window._realTex.paving   : texRoad;
 
     function createMat(tex, color, metal, rough) {
         const m = new THREE.MeshPhysicalMaterial({
@@ -1631,6 +1632,7 @@
                 new THREE.BoxGeometry(w, 2.5, w),
                 new THREE.MeshStandardMaterial({
                     map: texWood.map, roughnessMap: texWood.roughnessMap, normalMap: texWood.normalMap,
+                    aoMap: texWood.aoMap, aoMapIntensity: 0.6,
                     normalScale: new THREE.Vector2(1.5,1.5),
                     color: 0x6a3a20, roughness: 0.7, metalness: 0.05, envMapIntensity: 1.2
                 })
@@ -1768,13 +1770,20 @@
             {cx:-180,cz:50,r:50,c:25,mnH:8,mxH:40}
         ];
 
-        // 主体材质：砖纹理 PBR（增强版）
-        const wallMat = new THREE.MeshPhysicalMaterial({
-            map: texBrick.map, roughnessMap: texBrick.roughnessMap,
-            normalMap: texBrick.normalMap, normalScale: new THREE.Vector2(1.8, 1.8),
-            roughness: 0.75, metalness: 0.05, envMapIntensity: 1.8, color: 0xffffff,
-            clearcoat: 0.15, clearcoatRoughness: 0.5
-        });
+        // 主体材质：砖纹理 PBR（增强版）- v6.14 使用真实 ambientCG 纹理
+        const realBrick = REAL_TEX_BRICK();
+        const realConcrete = REAL_TEX_CONCRETE();
+        function makeWallMat(tex, colorHex) {
+            return new THREE.MeshPhysicalMaterial({
+                map: tex.map, roughnessMap: tex.roughnessMap,
+                normalMap: tex.normalMap, normalScale: new THREE.Vector2(1.8, 1.8),
+                aoMap: tex.aoMap, aoMapIntensity: 0.7,
+                roughness: 0.75, metalness: 0.05, envMapIntensity: 1.8, color: colorHex,
+                clearcoat: 0.15, clearcoatRoughness: 0.5
+            });
+        }
+        const wallMatBrick = makeWallMat(realBrick, 0xffffff);
+        const wallMatConcrete = makeWallMat(realConcrete, 0xcccccc);
         // 窗户材质：深蓝玻璃，自发光（夜间更亮）
         const winMat = new THREE.MeshPhysicalMaterial({
             color: 0x2a4060, metalness: 0.4, roughness: 0.08,
@@ -1815,8 +1824,8 @@
                 const w=U.rand(5,12), d2=U.rand(5,12), h=U.rand(reg.mnH, reg.mxH);
                 const group = new THREE.Group();
 
-                // ① 主体
-                const matInst = wallMat.clone();
+                // ① 主体 — 随机选择砖纹理或混凝土纹理
+                const matInst = (Math.random() < 0.55 ? wallMatBrick : wallMatConcrete).clone();
                 matInst.color = new THREE.Color(colors[U.randInt(0,colors.length-1)]);
                 const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d2), matInst);
                 body.position.set(0, h/2, 0);
