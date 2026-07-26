@@ -963,7 +963,133 @@
         window._plotGroup = plotGroup;
     }
 
-    // ---- 构建世界（P1+P2+P3: 地形 + 路网 + 地块） ----
+    // ===== P4: 建筑生成 (程序化建筑体) =====
+    // 判别地块所属城区
+    function getDistrict(cx, cz) {
+        const da = dist2D(cx,cz, 90,100); // A上城CBD
+        const db = dist2D(cx,cz, 0,50);   // B中城商住
+        const dc = dist2D(cx,cz, -100,-90); // C下城工业
+        const dd = dist2D(cx,cz, -30,-120); // D河岸
+        let best='B', minD=db;
+        if (da<minD) { best='A'; minD=da; }
+        if (dc<minD) { best='C'; minD=dc; }
+        if (dd<minD) { best='D'; minD=dd; }
+        return best;
+    }
+
+    // 城区建筑参数
+    const DISTRICT_PARAMS = {
+        A: { hMin:30, hMax:85, wMin:6, wMax:18, setback:0.4,  colors:[0x8899bb,0x7788aa,0x99aacc,0x667788], roofChance:0.8, glassChance:0.7 },
+        B: { hMin:12, hMax:40, wMin:5, wMax:14, setback:0.25, colors:[0xccbba0,0xbbaa88,0xd4c4a8,0xa89878], roofChance:0.5, glassChance:0.3 },
+        C: { hMin:8,  hMax:22, wMin:8, wMax:20, setback:0.15, colors:[0x665544,0x776655,0x554433,0x887766], roofChance:0.2, glassChance:0.1 },
+        D: { hMin:10, hMax:30, wMin:5, wMax:16, setback:0.3,  colors:[0x998877,0xaa9988,0x887766,0xbbaa99], roofChance:0.4, glassChance:0.25},
+    };
+
+    function rand(min,max) { return min+Math.random()*(max-min); }
+    function randInt(min,max) { return Math.floor(rand(min,max+0.999)); }
+
+    function buildBuildings() {
+        const bldGroup = new THREE.Group();
+        bldGroup.name = 'buildings';
+        const seed = 42;
+
+        // 简易伪随机（确定性，避免每次刷新不同）
+        let s = seed;
+        function rnd(mn,mx) { s=(s*1664525+1013904223)&0x7fffffff; return mn+(s/0x7fffffff)*(mx-mn); }
+
+        plots.forEach((plot, idx) => {
+            const dist = getDistrict(plot.cx, plot.cz);
+            const dp = DISTRICT_PARAMS[dist];
+            s = seed + idx * 137;
+
+            // 建筑占地：地块内缩退线
+            const setback = rnd(0.8, 1.8) + plot.w * dp.setback;
+            const bw = Math.min(plot.w - setback, rnd(dp.wMin*0.5, dp.wMin));
+            const bd = Math.min(plot.d - setback, rnd(dp.wMin*0.5, dp.wMin));
+            if (bw < 3 || bd < 3) return;
+
+            const totalH = rnd(dp.hMin, dp.hMax);
+            const cx = plot.cx + rnd(-0.3,0.3)*(plot.w-bw);
+            const cz = plot.cz + rnd(-0.3,0.3)*(plot.d-bd);
+            const baseY = getTerrainH(cx, cz);
+
+            // 建筑分段（底座+主体+顶冠）
+            const segments = [];
+            const segCount = totalH > 45 ? 3 : (totalH > 20 ? 2 : 1);
+
+            if (segCount >= 3) {
+                // 三段式：底座宽、中段略收、顶冠窄
+                const baseH = totalH*0.15;
+                const midH  = totalH*0.65;
+                const topH  = totalH*0.20;
+                segments.push({h:baseH, w:bw, d:bd, colorIdx:0});
+                segments.push({h:midH,  w:bw*0.88, d:bd*0.88, colorIdx:1});
+                segments.push({h:topH,  w:bw*0.6, d:bd*0.6, colorIdx:2});
+            } else if (segCount === 2) {
+                const baseH = totalH*0.25;
+                const topH  = totalH*0.75;
+                segments.push({h:baseH, w:bw, d:bd, colorIdx:0});
+                segments.push({h:topH,  w:bw*0.82, d:bd*0.82, colorIdx:1});
+            } else {
+                segments.push({h:totalH, w:bw, d:bd, colorIdx:0});
+            }
+
+            let accumY = baseY;
+            for (const seg of segments) {
+                const geo = new THREE.BoxGeometry(seg.w, seg.h, seg.d);
+                const color = dp.colors[seg.colorIdx % dp.colors.length];
+                const mat = new THREE.MeshStandardMaterial({
+                    color, roughness:0.6, metalness:0.3,
+                });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(cx, accumY + seg.h/2, cz);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                bldGroup.add(mesh);
+                accumY += seg.h;
+            }
+
+            // 楼顶装饰
+            if (rnd(0,1) < dp.roofChance) {
+                const roofSize = bw*0.35;
+                const roofH = rnd(1.5, 4);
+                const roofGeo = new THREE.BoxGeometry(roofSize, roofH, roofSize);
+                const roofMat = new THREE.MeshStandardMaterial({color:0x555555, roughness:0.4, metalness:0.7});
+                const roof = new THREE.Mesh(roofGeo, roofMat);
+                roof.position.set(cx, accumY+roofH/2, cz);
+                roof.castShadow = true;
+                bldGroup.add(roof);
+
+                // 空调外机 / 水箱小方块
+                if (rnd(0,1)>0.5) {
+                    const boxGeo = new THREE.BoxGeometry(roofSize*0.4, roofH*0.5, roofSize*0.3);
+                    const boxMat = new THREE.MeshStandardMaterial({color:0x888888, roughness:0.5, metalness:0.6});
+                    const box = new THREE.Mesh(boxGeo, boxMat);
+                    box.position.set(cx+roofSize*0.5, accumY+roofH*0.8, cz);
+                    bldGroup.add(box);
+                }
+            }
+
+            // 玻璃幕墙闪光条 (CBD高层)
+            if (dist==='A' && rnd(0,1)<dp.glassChance && totalH>40) {
+                const stripeH=totalH*0.7, stripeW=bw*0.07;
+                for (let si=0; si<3; si++) {
+                    const gGeo = new THREE.BoxGeometry(stripeW, stripeH, bd*1.02);
+                    const gMat = new THREE.MeshStandardMaterial({color:0xaaccff, roughness:0.15, metalness:0.9, emissive:0x112233, emissiveIntensity:0.3});
+                    const gMesh = new THREE.Mesh(gGeo, gMat);
+                    const sx = cx + (si-1)*bw*0.3;
+                    gMesh.position.set(sx, baseY+totalH*0.5, cz);
+                    bldGroup.add(gMesh);
+                }
+            }
+        });
+
+        scene.add(bldGroup);
+        window._bldGroup = bldGroup;
+        return bldGroup.children.length;
+    }
+
+    // ---- 构建世界（P1+P2+P3+P4: 地形 + 路网 + 地块 + 建筑） ----
     function buildWorld() {
         // Simplex Noise 地形
         const terrainSize = 500, terrainSeg = 200;
@@ -1012,6 +1138,10 @@
         const plotCount = buildPlots();
         console.log(`[P3] 地块: ${plotCount} 个`);
         renderPlots();
+
+        // ---- P4: 建筑生成 ----
+        const bldCount = buildBuildings();
+        console.log(`[P4] 建筑: ${bldCount} 个网格体`);
 
         // PBR 展示圈 - 测试材质
         if (window._realTex) {
@@ -1223,6 +1353,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
