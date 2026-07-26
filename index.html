@@ -311,6 +311,9 @@
     import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
     // v6.12 (M3.2): 自研 FilmShader（Vignette + Grain + 轻量 FXAA）
     import { FilmShader } from './src/core/FilmShader.js?v=4';
+    // v6.12.0: ECS 统一实体管理
+    import { World } from './src/ecs/index.js?v=4';
+    const world = new World();
     import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
     import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
@@ -2227,6 +2230,7 @@
             isPlayerVehicle:false, bodyW:bw, bodyL:bl
         };
         vehicles.push(v);
+        world.add({ transform: g, vehicle: v });
         return v;
     }
 
@@ -2489,6 +2493,7 @@
             id:npcs.length
         };
         npcs.push(npc);
+        world.add({ transform: m, npc });
         return npc;
     }
 
@@ -2805,12 +2810,12 @@
             v.mesh.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) o.material.dispose(); });
         }, 2000);
         const ex=v.mesh.position.x, ez=v.mesh.position.z;
-        npcs.forEach(n=>{
+        world.with('npc').each((id, { npc: n }) => {
             if(n.health<=0) return;
             const d=U.dist2D(n.mesh.position.x,n.mesh.position.z,ex,ez);
             if(d<15) damageNPC(n, 100*(1-d/15));
         });
-        vehicles.forEach(ov=>{
+        world.with('vehicle').each((id, { vehicle: ov }) => {
             if(ov!==v && ov.health>0 && !ov._exploded){
                 const d=U.dist2D(ov.mesh.position.x,ov.mesh.position.z,ex,ez);
                 if(d<10){ damageVehicle(ov,50); if(ov.health<=0) setTimeout(()=>explodeVehicle(ov),300); }
@@ -2875,7 +2880,7 @@
         if(w.magSize!==Infinity && w.magAmmo<=0 && w.ammo>0) reload();
         if(w.damage>=10){
             let witnessed=false;
-            npcs.forEach(n=>{ if(n.isPolice && n.health>0 && U.dist2D(player.pos.x,player.pos.z,n.mesh.position.x,n.mesh.position.z)<50) witnessed=true; });
+            world.with('npc').each((id, { npc: n }) => { if(n.isPolice && n.health>0 && U.dist2D(player.pos.x,player.pos.z,n.mesh.position.x,n.mesh.position.z)<50) witnessed=true; });
             increaseWanted(witnessed?0.5:0.2);
         }
         updateWeaponHUD();
@@ -2946,7 +2951,7 @@
                 p.pos.addScaledVector(p.vel, dt);
                 p.life -= dt;
                 let hit=false;
-                npcs.forEach(n=>{ if(n.health>0 && U.dist2D(p.pos.x,p.pos.z,n.mesh.position.x,n.mesh.position.z)<1){ damageNPC(n,100); hit=true; } });
+                world.with('npc').each((id, { npc: n }) => { if(n.health>0 && U.dist2D(p.pos.x,p.pos.z,n.mesh.position.x,n.mesh.position.z)<1){ damageNPC(n,100); hit=true; } });
                 buildings.forEach(b=>{ if(U.dist2D(p.pos.x,p.pos.z,b.x,b.z)<b.radius) hit=true; });
                 if(hit || p.life<=0){
                     createExplosion(p.pos.x, p.pos.z, 200);
@@ -2971,14 +2976,14 @@
     function createExplosion(x,z,dmg) {
         AudioSys.playExplosion();
         emitParticles(new THREE.Vector3(x,1,z), 30, 0xff6600);
-        npcs.forEach(n=>{
+        world.with('npc').each((id, { npc: n }) => {
             if(n.health<=0) return;
             const d=U.dist2D(n.mesh.position.x,n.mesh.position.z,x,z);
             if(d<12) damageNPC(n, dmg*(1-d/12));
         });
         const pd=U.dist2D(player.pos.x,player.pos.z,x,z);
         if(pd<12) takeDamage(dmg*0.5*(1-pd/12), 'explosion');
-        vehicles.forEach(v=>{
+        world.with('vehicle').each((id, { vehicle: v }) => {
             if(v.health>0){
                 const d=U.dist2D(v.mesh.position.x,v.mesh.position.z,x,z);
                 if(d<15){ damageVehicle(v, dmg*(1-d/15)); if(v.health<=0) setTimeout(()=>explodeVehicle(v),200); }
@@ -3162,7 +3167,7 @@
     function updateWantedDecay(dt) {
         if(player.wantedLevel<=0) return;
         let witnessed=false;
-        npcs.forEach(n=>{ if(n.isPolice && n.health>0 && U.dist2D(player.pos.x,player.pos.z,n.mesh.position.x,n.mesh.position.z)<40) witnessed=true; });
+        world.with('npc').each((id, { npc: n }) => { if(n.isPolice && n.health>0 && U.dist2D(player.pos.x,player.pos.z,n.mesh.position.x,n.mesh.position.z)<40) witnessed=true; });
         if(!witnessed){
             player.wantedLevel = Math.max(0, player.wantedLevel - dt*0.05);
             updateWantedHUD();
@@ -3400,7 +3405,7 @@
                 }
             });
         }
-        npcs.forEach(n=>{
+        world.with('npc').each((id, { npc: n }) => {
             if(n.health<=0) return;
             const [x,y]=w2r(n.mesh.position.x,n.mesh.position.z);
             if(Math.hypot(x-cx,y-cy)<r-2){
@@ -3408,7 +3413,7 @@
                 ctx.beginPath(); ctx.arc(x,y,1.6,0,Math.PI*2); ctx.fill();
             }
         });
-        vehicles.forEach(v=>{
+        world.with('vehicle').each((id, { vehicle: v }) => {
             if(v.health<=0) return;
             const [x,y]=w2r(v.mesh.position.x,v.mesh.position.z);
             if(Math.hypot(x-cx,y-cy)<r-2){
