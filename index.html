@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.3 · P20B-III 雾效+湿镜头 (2026-07-27)</title>
+    <title>星渊城 v15.4 · P20C 光照氛围适配 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -41,14 +41,14 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.2</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v15.4</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.2 · P20B 降水粒子升级
+    // 星渊城 v15.4 · P20C 光照氛围适配
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -245,14 +245,31 @@
                     d
                 )
             );
+            // P20C-I: 天气色调偏移 (阴天→灰蓝 / 暴雨→暗紫 / 沙尘→棕黄)
+            sd.material.uniforms.uWeatherDarken.value = w.skyDarken;
+            const stormHue = new THREE.Color().lerpColors(
+                new THREE.Color(0.65, 0.70, 0.80), // 阴天灰蓝
+                new THREE.Color(0.35, 0.30, 0.45), // 暴雨暗紫
+                Math.min(w.fogBoost * 1.5, 1.0)
+            );
+            sd.material.uniforms.uWeatherHue.value.copy(stormHue);
         }
 
-        // 太阳 DirectionalLight：天气削弱
+        // P20C-II: 太阳 DirectionalLight 天气调制增强
         if (window._sun) {
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
-            updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
-            updateLightColor(sun, 0xfff0d0, 0x445577, d);
+            // 阴天削弱更强 + 雨天色温冷移
+            const stormAtten = lightAtten * (1 - w.fogBoost * 0.4);
+            updateLightIntensity(sun, 3.0, 3.0*stormAtten, 0.10, d);
+            // 天气色温：晴天暖黄 → 阴天灰 → 暴风雨冷靛
+            const sunDay = new THREE.Color().lerpColors(
+                new THREE.Color(0xfff0d0), new THREE.Color(0x8899bb), w.skyDarken
+            );
+            const sunNight = new THREE.Color().lerpColors(
+                new THREE.Color(0x445577), new THREE.Color(0x1a1a33), w.skyDarken
+            );
+            updateLightColor(sun, sunDay.getHex(), sunNight.getHex(), d);
         }
 
         if (ambient) {
@@ -563,6 +580,7 @@
         }
 
         // 闪电衰减
+        if (window._flashPass) window._flashPass.uniforms.uFlash.value = 1.0;
         const decayStart = performance.now();
         function decayBolt() {
             const elapsed = (performance.now() - decayStart) / 1000;
@@ -570,11 +588,13 @@
             if (boltLine) boltLine.material.opacity = fade * 0.9;
             if (boltGlow) boltGlow.material.opacity = fade * 0.3;
             if (boltLight) boltLight.intensity = 80 * fade;
+            if (window._flashPass) window._flashPass.uniforms.uFlash.value = fade;
             if (elapsed < 0.35) { requestAnimationFrame(decayBolt); }
             else {
                 if (boltLine) { scene.remove(boltLine); boltLine.geometry.dispose(); boltLine.material.dispose(); boltLine=null; }
                 if (boltGlow) { scene.remove(boltGlow); boltGlow.geometry.dispose(); boltGlow.material.dispose(); boltGlow=null; }
                 if (boltLight) boltLight.intensity = 0;
+                if (window._flashPass) window._flashPass.uniforms.uFlash.value = 0.0;
             }
         }
         requestAnimationFrame(decayBolt);
@@ -1534,9 +1554,11 @@
                 uTurbidity: { value: 2.5 },
                 uExposure: { value: 1.0 },
                 uGroundColor: { value: new THREE.Color(0.02, 0.01, 0.02) },
-                uCloudCover: { value: 0.5 }
+                uCloudCover: { value: 0.5 },
+                uWeatherDarken: { value: 0.0 },
+                uWeatherHue: { value: new THREE.Color(0xffffff) }
             },
-            // ===== P18 大气散射天空穹顶 =====
+            // ===== P18+P20C-I 大气散射天空穹顶 (天气色调适配) =====
             vertexShader: `
                 varying vec3 vWorldPosition;
                 void main() {
@@ -1555,6 +1577,8 @@
                 uniform float uExposure;
                 uniform vec3 uGroundColor;
                 uniform float uCloudCover;
+                uniform float uWeatherDarken;
+                uniform vec3 uWeatherHue;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -1682,6 +1706,9 @@
                     }
 
                     // ===== HDR 色调映射 =====
+                    // P20C-I: 天气色调偏移
+                    skyColor = mix(skyColor, skyColor * mix(vec3(1.0), vec3(0.45, 0.50, 0.65), uWeatherDarken), uWeatherDarken * 0.8);
+                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.3);
                     skyColor = skyColor / (skyColor * uExposure + vec3(1.0));
                     skyColor = pow(skyColor, vec3(1.0/2.2));
                     gl_FragColor = vec4(skyColor, 1.0);
@@ -1739,6 +1766,32 @@
         clock = new THREE.Clock();
 
         // ---- P20B-III: Wet Lens Shader ----
+        // P20C-III: Lightning Flash Shader (全屏闪白)
+        const LightningFlashShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                uFlash: { value: 0.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform float uFlash;
+                varying vec2 vUv;
+                void main() {
+                    vec4 color = texture2D(tDiffuse, vUv);
+                    float flash = smoothstep(0.0, 0.3, uFlash) * (1.0 - smoothstep(0.5, 1.0, uFlash));
+                    color.rgb = mix(color.rgb, vec3(1.0, 0.98, 0.92), flash * 0.55);
+                    gl_FragColor = color;
+                }
+            `
+        };
+
         const WetLensShader = {
             uniforms: {
                 tDiffuse: { value: null },
@@ -1872,6 +1925,13 @@
                 window._wetLens = wetLensPass;
             } catch (e) { console.warn('WetLensPass failed, skip', e); }
 
+            // P20C-III: Lightning Flash
+            try {
+                const flashPass = new ShaderPass(LightningFlashShader);
+                composer.addPass(flashPass);
+                window._flashPass = flashPass;
+            } catch (e) { console.warn('LightningFlashPass failed, skip', e); }
+
             outputPass = new OutputPass();
             composer.addPass(outputPass);
             window._composer = composer;
@@ -1887,6 +1947,11 @@
                 0.3, 0.4, 0.85
             );
             composer.addPass(bloomPass);
+            try {
+                const flashPass = new ShaderPass(LightningFlashShader);
+                composer.addPass(flashPass);
+                window._flashPass = flashPass;
+            } catch (e) {}
             composer.addPass(new OutputPass());
             window._bloom = bloomPass;
             window._composer = composer;
