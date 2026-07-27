@@ -146,6 +146,152 @@
         try { rebuildPostPipeline(cfg); } catch (e) { console.warn('[quality] rebuild post failed', e); }
     }
 
+    // ===== P6+P8: 日夜循环 + 夜景发光 =====
+    const DAYNIGHT = {
+        cycleDuration: 150,              // 完整日夜循环秒数（2.5分钟）
+        elapsed: 0,
+        dayness: 0.85,                   // 起始值（白天）
+        prevDayness: 0.85,              // 上一帧值（用于阈值检测）
+        targetSpeed: 1.0,               // 时间倍速（1=正常）
+    };
+    window._bldMeshes = [];              // 建筑网格引用 {mesh, nightEmissive}
+    window._lampLights = [];             // 路灯 PointLight 引用
+    window._glassStripes = [];           // CBD 玻璃幕墙引用 {mesh, baseEmissiveIntensity}
+
+    function updateLightIntensity(light, baseVal, dayScale, nightScale, t) {
+        light.intensity = baseVal * (nightScale + (dayScale - nightScale) * t);
+    }
+    function updateLightColor(light, dayColor, nightColor, t) {
+        const dc = new THREE.Color(dayColor), nc = new THREE.Color(nightColor);
+        light.color.copy(dc).lerp(nc, 1 - t);
+    }
+
+    function updateDayNight(dt) {
+        DAYNIGHT.elapsed += dt * DAYNIGHT.targetSpeed;
+        DAYNIGHT.prevDayness = DAYNIGHT.dayness;
+        // 使用平滑正弦曲线：phase偏移使起始为白天
+        const fullCycle = DAYNIGHT.cycleDuration;
+        const raw = Math.sin((DAYNIGHT.elapsed / fullCycle) * Math.PI * 2 + Math.PI * 0.75);
+        DAYNIGHT.dayness = (raw + 1) / 2;
+        const d = DAYNIGHT.dayness;
+
+        // 太阳方向：东→西弧线，正午高角
+        const sunPhase = (DAYNIGHT.elapsed / fullCycle) * Math.PI * 2;
+        const sunElevation = Math.sin(sunPhase - Math.PI * 0.15) * 0.75 + 0.25;
+        const sunAzimuthX = Math.cos(sunPhase + Math.PI * 0.2);
+        const sunAzimuthZ = Math.sin(sunPhase + Math.PI * 0.2);
+        const sunDir = new THREE.Vector3(sunAzimuthX, sunElevation, sunAzimuthZ).normalize();
+
+        // 更新 SkyDome uniforms
+        const sd = window._skyDome;
+        if (sd) {
+            sd.material.uniforms.uDayness.value = d;
+            sd.material.uniforms.uSunDirection.value.copy(sunDir);
+            // 日落色调：dayness<0.3时暖化
+            const sunsetWarm = 1 - Math.max(0, (d - 0.15) / 0.2);
+            sd.material.uniforms.uSunColor.value.copy(
+                new THREE.Color(1.0, 0.95 - sunsetWarm * 0.3, 0.8 - sunsetWarm * 0.5)
+            );
+            sd.material.uniforms.uZenithColor.value.copy(
+                new THREE.Color().lerpColors(
+                    new THREE.Color(0.08, 0.08, 0.18),
+                    new THREE.Color(0.2, 0.5, 0.9),
+                    d
+                )
+            );
+            sd.material.uniforms.uHorizonColor.value.copy(
+                new THREE.Color().lerpColors(
+                    new THREE.Color(0.3, 0.15, 0.05),
+                    new THREE.Color(0.8, 0.85, 0.9),
+                    d
+                )
+            );
+            sd.material.uniforms.uGroundColor.value.copy(
+                new THREE.Color().lerpColors(
+                    new THREE.Color(0.01, 0.005, 0.01),
+                    new THREE.Color(0.02, 0.01, 0.02),
+                    d
+                )
+            );
+        }
+
+        // 更新太阳 DirectionalLight
+        if (window._sun) {
+            const sun = window._sun;
+            sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
+            updateLightIntensity(sun, 3.0, 3.0, 0.12, d);
+            updateLightColor(sun, 0xfff0d0, 0x445577, d);
+        }
+
+        // 环境光：白天暖，夜晚暗蓝
+        if (ambient) {
+            updateLightIntensity(ambient, 0.45, 0.45, 0.06, d);
+            updateLightColor(ambient, 0x8a7a6a, 0x223344, d);
+        }
+
+        // 半球光
+        if (hemi) {
+            updateLightIntensity(hemi, 0.6, 0.6, 0.06, d);
+            updateLightColor(hemi, 0x9ec5e8, 0x112233, d);
+        }
+
+        // 补光
+        const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c.intensity < 1);
+        if (fill) updateLightIntensity(fill, 0.55, 0.55, 0.04, d);
+
+        // 雾色：白天淡蓝灰，夜晚深黑蓝
+        const fogDay = new THREE.Color(0x7a9ab8), fogNight = new THREE.Color(0x0a0e14);
+        const fogColor = fogDay.clone().lerp(fogNight, 1 - d);
+        if (scene.fog) scene.fog.color.copy(fogColor);
+        if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015;
+
+        // 雾平面颜色
+        if (window._fogPlane) {
+            const fp = window._fogPlane;
+            fp.material.uniforms.uColor.value.copy(fogColor).multiplyScalar(0.6);
+            fp.material.uniforms.uFogColor.value.copy(fogColor);
+        }
+
+        // Tone mapping exposure：夜晚略暗
+        if (renderer) renderer.toneMappingExposure = 0.65 + d * 0.55;
+
+        // ==== 夜景发光：阈值触发（避免每帧遍历所有材质） ====
+        const nightThreshold = 0.35;
+        const crossedIntoNight = (DAYNIGHT.prevDayness > nightThreshold && d <= nightThreshold);
+        const crossedOutOfNight = (DAYNIGHT.prevDayness <= nightThreshold && d > nightThreshold);
+
+        if (crossedIntoNight || crossedOutOfNight) {
+            const nightFactor = d < nightThreshold ? (1 - d / nightThreshold) : 0;
+
+            // 建筑窗户 emissive
+            for (const bm of window._bldMeshes) {
+                if (bm.nightEmissive) {
+                    bm.mesh.material.emissive.copy(bm.nightEmissive);
+                    bm.mesh.material.emissiveIntensity = nightFactor * 0.7;
+                    bm.mesh.material.needsUpdate = true;
+                }
+            }
+
+            // CBD 玻璃幕墙 emissive 增强
+            for (const gs of window._glassStripes) {
+                gs.mesh.material.emissiveIntensity = gs.baseEmissiveIntensity + nightFactor * 0.8;
+            }
+
+            // 路灯
+            for (const lamp of window._lampLights) {
+                lamp.intensity = 1.0 + nightFactor * 7.0;
+            }
+        }
+
+        // 路灯渐变（在阈值区间内平滑）
+        if (d < nightThreshold + 0.08) {
+            const nf = d < nightThreshold ? (1 - d / nightThreshold) : 0;
+            for (const lamp of window._lampLights) {
+                lamp.intensity = 1.0 + nf * 7.0;
+            }
+        }
+    }
+
     // ---- PBR 纹理加载 ----
     async function loadRealTextures() {
         const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron', 'paving'];
@@ -1058,6 +1204,11 @@
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 bldGroup.add(mesh);
+                // P6+P8: 记录建筑网格，夜景窗户发光
+                window._bldMeshes.push({
+                    mesh,
+                    nightEmissive: new THREE.Color(dist === 'A' ? 0x8899cc : (dist === 'B' ? 0xffcc66 : 0x665544))
+                });
                 accumY += seg.h;
             }
 
@@ -1092,6 +1243,8 @@
                     const sx = cx + (si-1)*bw*0.3;
                     gMesh.position.set(sx, baseY+totalH*0.5, cz);
                     bldGroup.add(gMesh);
+                    // P6+P8: 玻璃幕墙夜景加强
+                    window._glassStripes.push({mesh: gMesh, baseEmissiveIntensity: 0.3});
                 }
             }
         });
@@ -1256,6 +1409,8 @@
                         const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
                         pt.position.copy(lamp.position);
                         furnGroup.add(pt);
+                        // P6+P8: 记录路灯以便日夜切换
+                        window._lampLights.push(pt);
                     }
                 }
             }
@@ -1768,6 +1923,7 @@
         const dt = Math.min(clock.getDelta(), 0.05);
 
         if (gameStarted && !gamePaused) {
+            updateDayNight(dt);
             updatePlayer(dt);
             updatePedestrians(dt);
         }
@@ -1782,8 +1938,8 @@
         if (composer) composer.render();
         else if (renderer) renderer.render(scene, camera);
 
-        // 显示 FPS
-        document.getElementById('info').textContent = `v8.0 | FPS: ${Math.round(1/dt)}`;
+        // 显示 FPS + dayness
+        document.getElementById('info').textContent = `v8.0 P11A | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness > 0.5 ? '☀' : '🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}%`;
     }
 
     // ---- 启动 ----
