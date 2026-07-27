@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.0 · P19 平面反射 (2026-07-27)</title>
+    <title>星渊城 v15.3 · P20B-III 雾效+湿镜头 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -41,14 +41,14 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.0</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v15.2</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.0 · P19 平面反射
+    // 星渊城 v15.2 · P20B 降水粒子升级
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -56,9 +56,11 @@
     // P14: 3D音频系统（程序化合成：风/雨/雷/城市底噪/鸟鸣）
     // P15: 植被系统（Cross-Plane Instanced Billboard, 行道树沿路放置）
     // P16: 水体系统（Gerstner 8波 + Schlick Fresnel + 泡沫 + 日夜/季节联动）
-// P18: 体积大气系统（Rayleigh+Mie散射天空 + 大气透视雾）
+    // P18: 体积大气系统（Rayleigh+Mie散射天空 + 大气透视雾）
     // P19: 平面反射系统（GTA5同款: 240×120镜像相机, 反射城市天际线）
+    // P20A: 天气-水体耦合（风暴调暗 + 雨天反射/泡沫增强 + 闪电同步）
     // P17: 内饰映射系统
+    // P20B: 降水粒子升级（Rain 50K LineSegments + Snow 30K InstancedMesh Billboard + Splash 500 ring pool）
     // ============================================================
 
     import * as THREE from 'three';
@@ -282,6 +284,7 @@
             fp.material.uniforms.uColor.value.copy(fogFinal).multiplyScalar(0.6);
             fp.material.uniforms.uFogColor.value.copy(fogFinal);
             fp.material.uniforms.uTime && (fp.material.uniforms.uTime.value += dt * (1 + w.rainIntensity * 2));
+            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(w.wind.force * 1.5, w.wind.force * 1.8);
         }
 
         // Tone mapping
@@ -582,21 +585,32 @@
         setTimeout(() => _playThunder(), thunderDelay * 1000);
     }
 
-    // ---- 雨系统 ----
+    // ---- P20B: 雨系统 (CK42BB 升级, 50K LineSegments) ----
     let rainMesh = null;
+    const RAIN_COUNT_MOBILE = 20000;
+    const RAIN_COUNT_DESKTOP = 50000;
+
     function createRainSystem() {
         if (rainMesh) return;
-        const count = isMobile ? 15000 : 40000;
-        const spawnW = 55, spawnH = 32;
-        const positions = new Float32Array(count * 6);
-        const seeds = new Float32Array(count * 2);
+        const count = isMobile ? RAIN_COUNT_MOBILE : RAIN_COUNT_DESKTOP;
+        const spawnW = 56, spawnH = 34;
+        const vertices = count * 2;
+        const positions = new Float32Array(vertices * 3);
+        const seeds = new Float32Array(vertices * 2);
+
         for (let i = 0; i < count; i++) {
             const x = rng.range(-spawnW, spawnW);
             const y = rng.float() * spawnH;
             const z = rng.range(-spawnW, spawnW);
-            positions[i*6]=x; positions[i*6+1]=y; positions[i*6+2]=z;
-            positions[i*6+3]=x; positions[i*6+4]=y-0.35; positions[i*6+5]=z;
-            seeds[i*2]=rng.float(); seeds[i*2+1]=rng.float() * Math.PI * 2;
+            const seed = rng.float();
+            const phase = rng.float() * Math.PI * 2;
+            const i6 = i * 6;
+            // both vertices share base position; VS distinguishes top/bottom via gl_VertexID
+            positions[i6]=x; positions[i6+1]=y; positions[i6+2]=z;
+            positions[i6+3]=x; positions[i6+4]=y; positions[i6+5]=z;
+            const i4 = i * 4;
+            seeds[i4]=seed; seeds[i4+1]=phase;
+            seeds[i4+2]=seed; seeds[i4+3]=phase;
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -604,32 +618,37 @@
         const mat = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: {value:0}, uIntensity: {value:0}, uWind: {value:new THREE.Vector3()},
-                uGravity: {value:-16}, uSpawnH: {value:spawnH}, uSpawnW: {value:spawnW},
+                uGravity: {value:-20}, uSpawnH: {value:spawnH}, uSpawnW: {value:spawnW},
+                uDropLength: {value:0.35}, uOpacity: {value:0.5},
+                uColor: {value:new THREE.Color(0.72,0.80,0.95)},
                 uCameraPos: {value:new THREE.Vector3()}
             },
             vertexShader: `
                 attribute vec2 aSeed;
-                uniform float uTime, uIntensity, uGravity, uSpawnH, uSpawnW;
+                uniform float uTime, uIntensity, uGravity, uSpawnH, uSpawnW, uDropLength, uOpacity;
                 uniform vec3 uWind, uCameraPos;
                 varying float vAlpha;
                 void main() {
                     float seed = aSeed.x, phase = aSeed.y;
-                    float speed = (0.5+seed*0.5)*abs(uGravity)*uIntensity;
-                    float t = mod(uTime*speed+phase*5.0, 1.0);
-                    float y0 = uSpawnH;
-                    float y = y0 - t*uSpawnH - uGravity*t*t*0.1;
-                    float xOffset = uWind.x*t*0.8 + uWind.z*t*0.3*seed;
-                    float zOffset = uWind.z*t*0.8 - uWind.x*t*0.3*seed;
-                    vec3 pos = position + vec3(xOffset, y-position.y, zOffset);
+                    float isTip = float(gl_VertexID & 1);
+                    float speed = (0.45 + seed * 0.55) * abs(uGravity) * max(uIntensity, 0.001);
+                    float cycleTime = uSpawnH / speed;
+                    float t = mod(uTime + phase * cycleTime * 0.3, cycleTime) / cycleTime;
+                    float fallY = uSpawnH - t * uSpawnH;
+                    float newY = fallY - isTip * uDropLength;
+                    float windX = uWind.x * t * 0.65 + uWind.z * t * 0.2 * seed;
+                    float windZ = uWind.z * t * 0.65 - uWind.x * t * 0.2 * seed;
+                    vec3 pos = vec3(position.x + windX, newY, position.z + windZ);
                     pos.xz += uCameraPos.xz;
-                    vAlpha = smoothstep(0.0,0.08,t)*smoothstep(1.0,0.85,t)*uIntensity;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
+                    vAlpha = smoothstep(0.0, 0.04, t) * smoothstep(1.0, 0.82, t) * uIntensity * uOpacity;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
                 }
             `,
             fragmentShader: `
+                uniform vec3 uColor;
                 varying float vAlpha;
                 void main() {
-                    gl_FragColor = vec4(0.75,0.82,0.95,vAlpha*0.45);
+                    gl_FragColor = vec4(uColor, vAlpha);
                 }
             `,
             transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
@@ -644,11 +663,100 @@
     function updateRainSystem(dt) {
         if (!rainMesh) return;
         const m = rainMesh.material;
+        const intensity = WEATHER.lerped.rainIntensity;
         m.uniforms.uTime.value += dt;
-        m.uniforms.uIntensity.value = WEATHER.lerped.rainIntensity;
+        m.uniforms.uIntensity.value = intensity;
         m.uniforms.uWind.value.copy(WEATHER.wind.force || WEATHER.wind.dir);
+        m.uniforms.uDropLength.value = 0.3 + intensity * 0.45;
+        m.uniforms.uOpacity.value = 0.4 + intensity * 0.4;
         if (camera) m.uniforms.uCameraPos.value.copy(camera.position);
-        rainMesh.visible = WEATHER.lerped.rainIntensity > 0.05;
+        rainMesh.visible = intensity > 0.03;
+    }
+
+    // ---- P20B-II: Splash 地面水花 (InstancedMesh ring pool) ----
+    let splashMesh = null;
+    const SPLASH_MAX = 500;
+    const SPLASH_LIFETIME = 0.28;
+    let splashData = [];
+
+    function createSplashSystem() {
+        if (splashMesh) return;
+        const ringGeo = new THREE.RingGeometry(0.25, 0.38, 16);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0xccddff,
+            transparent: true, opacity: 0.38,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        splashMesh = new THREE.InstancedMesh(ringGeo, mat, SPLASH_MAX);
+        splashMesh.frustumCulled = false;
+        splashMesh.renderOrder = 2;
+        splashMesh.count = SPLASH_MAX;
+
+        const dummy = new THREE.Object3D();
+        dummy.position.set(0, -999, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        for (let i = 0; i < SPLASH_MAX; i++) {
+            splashMesh.setMatrixAt(i, dummy.matrix);
+        }
+        splashMesh.instanceMatrix.needsUpdate = true;
+
+        splashData = new Array(SPLASH_MAX).fill(null).map(() => ({ life: 0, maxLife: 0, x: 0, z: 0 }));
+        scene.add(splashMesh);
+        window._splashMesh = splashMesh;
+    }
+
+    function updateSplashSystem(dt) {
+        if (!splashMesh) return;
+        const intensity = WEATHER.lerped.rainIntensity;
+        const cx = camera ? camera.position.x : 0;
+        const cz = camera ? camera.position.z : 0;
+
+        // spawn
+        if (intensity > 0.05) {
+            const spawnRate = intensity * 700;
+            let toSpawn = spawnRate * dt;
+            if (Math.random() < toSpawn - Math.floor(toSpawn)) toSpawn = Math.ceil(toSpawn);
+            else toSpawn = Math.floor(toSpawn);
+            for (let s = 0; s < toSpawn; s++) {
+                const angle = rng.float() * Math.PI * 2;
+                const dist = Math.sqrt(rng.float()) * 22;
+                const sx = cx + Math.cos(angle) * dist;
+                const sz = cz + Math.sin(angle) * dist;
+                for (let i = 0; i < SPLASH_MAX; i++) {
+                    if (splashData[i].life <= 0) {
+                        splashData[i].x = sx;
+                        splashData[i].z = sz;
+                        splashData[i].maxLife = SPLASH_LIFETIME * (0.6 + rng.float() * 0.8);
+                        splashData[i].life = splashData[i].maxLife;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // update
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < SPLASH_MAX; i++) {
+            const sd = splashData[i];
+            if (sd.life > 0) {
+                sd.life -= dt;
+                if (sd.life <= 0) {
+                    dummy.position.set(0, -999, 0);
+                    dummy.scale.set(0, 0, 0);
+                } else {
+                    const t = 1.0 - sd.life / sd.maxLife;
+                    const scale = 0.15 + t * 2.2;
+                    dummy.position.set(sd.x, 0.06, sd.z);
+                    dummy.rotation.set(-Math.PI / 2, 0, 0);
+                    dummy.scale.set(scale, scale, scale);
+                }
+                dummy.updateMatrix();
+                splashMesh.setMatrixAt(i, dummy.matrix);
+            }
+        }
+        splashMesh.instanceMatrix.needsUpdate = true;
     }
 
     // ---- P13: 秋叶系统 (InstancedMesh) ----
@@ -740,77 +848,120 @@
         leafMesh.instanceMatrix.needsUpdate = true;
     }
 
-    // ---- P13: 冬雪系统 ----
+    // ---- P20B: 冬雪系统 (InstancedMesh Billboard, 30K flakes) ----
     let snowMesh = null;
+    const SNOW_COUNT_MOBILE = 12000;
+    const SNOW_COUNT_DESKTOP = 30000;
+
     function createSnowSystem() {
         if (snowMesh) return;
-        const count = 8000;
+        const count = isMobile ? SNOW_COUNT_MOBILE : SNOW_COUNT_DESKTOP;
         const spawnW = 45, spawnH = 30;
-        const positions = new Float32Array(count * 6);
-        const seeds = new Float32Array(count * 2);
-        
+
+        // shared quad geometry
+        const quadGeo = new THREE.PlaneGeometry(1, 1);
+        // per-instance random data: (sizeVariation, phaseSeed)
+        const randData = new Float32Array(count * 2);
         for (let i = 0; i < count; i++) {
-            const x = rng.range(-spawnW, spawnW);
-            const y = rng.float() * spawnH;
-            const z = rng.range(-spawnW, spawnW);
-            positions[i*6]=x; positions[i*6+1]=y; positions[i*6+2]=z;
-            positions[i*6+3]=x; positions[i*6+4]=y-0.25; positions[i*6+5]=z;
-            seeds[i*2]=rng.float(); seeds[i*2+1]=rng.float() * Math.PI * 2;
+            randData[i*2] = rng.float();
+            randData[i*2+1] = rng.float() * Math.PI * 2;
         }
-        
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 2));
-        
+        quadGeo.setAttribute('aRand', new THREE.InstancedBufferAttribute(randData, 2));
+
         const mat = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: {value:0}, uAmount: {value:0}, uWind: {value:new THREE.Vector3()},
-                uGravity: {value:-3.5}, uSpawnH: {value:spawnH}, uSpawnW: {value:spawnW},
+                uSpeed: {value:2.5}, uSway: {value:0.7}, uSpawnH: {value:spawnH}, uSpawnW: {value:spawnW},
                 uCameraPos: {value:new THREE.Vector3()}
             },
             vertexShader: `
-                attribute vec2 aSeed;
-                uniform float uTime, uAmount, uGravity, uSpawnH, uSpawnW;
+                attribute vec2 aRand;
+                uniform float uTime, uAmount, uSpeed, uSway, uSpawnH, uSpawnW;
                 uniform vec3 uWind, uCameraPos;
                 varying float vAlpha;
+                varying vec2 vUv;
+                varying float vCore;
                 void main() {
-                    float seed = aSeed.x, phase = aSeed.y;
-                    float speed = (0.4+seed*0.6)*abs(uGravity)*uAmount;
-                    float t = mod(uTime*speed*0.5+phase*3.0, 1.0);
-                    float y0 = uSpawnH;
-                    float y = y0 - t*uSpawnH - uGravity*t*t*0.005;
-                    // 雪花飘摇
-                    float swayX = sin(uTime*2.0+phase)*0.8*seed + cos(uTime*1.3+phase*2.0)*0.4;
-                    float swayZ = cos(uTime*1.7+phase)*0.8*seed + sin(uTime*2.2+phase*2.0)*0.4;
-                    float xOffset = uWind.x*t*0.35 + swayX;
-                    float zOffset = uWind.z*t*0.35 + swayZ;
-                    vec3 pos = position + vec3(xOffset, y-position.y, zOffset);
-                    pos.xz += uCameraPos.xz;
-                    vAlpha = smoothstep(0.0,0.06,t)*smoothstep(1.0,0.9,t)*uAmount;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
+                    vec3 basePos = instanceMatrix[3].xyz;
+                    float phase = aRand.y;
+                    float fallSpeed = uSpeed * (0.55 + 0.80 * aRand.y) * max(uAmount, 0.001);
+                    float cycleT = uSpawnH / fallSpeed;
+                    float rawT = mod(uTime + phase * cycleT * 0.35, cycleT);
+                    float t = rawT / cycleT;
+                    float newY = uSpawnH - t * uSpawnH;
+                    // figure-eight flutter
+                    float sf = uSway * (0.25 + 0.75 * aRand.y) * uAmount;
+                    float swayX = sin(uTime*0.7+phase) + 0.35*sin(uTime*1.6+phase*1.7);
+                    float swayZ = cos(uTime*0.6+phase) + 0.35*cos(uTime*1.3+phase*1.3);
+                    // wind drift (subtle; accumulates over t)
+                    float windX = uWind.x * t * 0.025;
+                    float windZ = uWind.z * t * 0.025;
+                    vec3 animatedPos = vec3(
+                        basePos.x + windX + swayX * sf,
+                        newY,
+                        basePos.z + windZ + swayZ * sf
+                    );
+                    // camera-centered volume wrapping
+                    vec3 camFloor = vec3(uCameraPos.x, 0.0, uCameraPos.z);
+                    vec3 vol = vec3(uSpawnW * 2.0, uSpawnH, uSpawnW * 2.0);
+                    vec3 origin = camFloor - vec3(uSpawnW, 0.0, uSpawnW);
+                    animatedPos = mod(animatedPos - origin, vol) + origin;
+                    // billboard: extract camera right/up from viewMatrix
+                    float size = (0.05 + aRand.x * 0.10) * uAmount;
+                    vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]) * size;
+                    vec3 up    = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]) * size;
+                    vec3 worldPos = animatedPos + right * position.x + up * position.y;
+                    gl_Position = projectionMatrix * viewMatrix * vec4(worldPos, 1.0);
+                    vUv = uv;
+                    vAlpha = smoothstep(0.0, 0.04, t) * smoothstep(1.0, 0.84, t) * uAmount;
+                    vCore = aRand.x;
                 }
             `,
             fragmentShader: `
                 varying float vAlpha;
+                varying vec2 vUv;
+                varying float vCore;
                 void main() {
-                    gl_FragColor = vec4(0.95,0.97,1.0,vAlpha*0.55);
+                    float d = length(vUv - 0.5) * 2.0;
+                    float disc = 1.0 - smoothstep(0.70, 1.0, d);
+                    float core = 1.0 - smoothstep(0.0, 0.32, d);
+                    float alpha = disc * 0.58 + core * 0.22 * (0.5 + 0.5 * vCore);
+                    alpha *= vAlpha;
+                    if (alpha < 0.003) discard;
+                    gl_FragColor = vec4(0.95, 0.97, 1.0, alpha);
                 }
             `,
-            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+            transparent: true, depthWrite: false, blending: THREE.NormalBlending
         });
-        
-        snowMesh = new THREE.LineSegments(geo, mat);
+
+        snowMesh = new THREE.InstancedMesh(quadGeo, mat, count);
         snowMesh.frustumCulled = false;
         snowMesh.renderOrder = 1;
         snowMesh.visible = false;
+
+        // initialize instance matrices with random positions in volume
+        const dummy = new THREE.Object3D();
+        for (let i = 0; i < count; i++) {
+            dummy.position.set(
+                rng.range(-spawnW, spawnW),
+                rng.float() * spawnH,
+                rng.range(-spawnW, spawnW)
+            );
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            snowMesh.setMatrixAt(i, dummy.matrix);
+        }
+        snowMesh.instanceMatrix.needsUpdate = true;
+
         scene.add(snowMesh);
         window._snowMesh = snowMesh;
     }
-    
+
     function updateSnowSystem(dt) {
         if (!snowMesh) return;
         const amount = SEASON.lerped.snowAmount;
-        snowMesh.visible = amount > 0.03;
+        snowMesh.visible = amount > 0.02;
         if (!snowMesh.visible) return;
         const m = snowMesh.material;
         m.uniforms.uTime.value += dt;
@@ -1587,6 +1738,86 @@
 
         clock = new THREE.Clock();
 
+        // ---- P20B-III: Wet Lens Shader ----
+        const WetLensShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                uTime: { value: 0 },
+                uWetness: { value: 0.0 },
+                uResolution: { value: new THREE.Vector2() },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform sampler2D tDiffuse;
+                uniform float uTime, uWetness;
+                uniform vec2 uResolution;
+
+                float hash(vec2 p) {
+                    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                }
+                float noise(vec2 p) {
+                    vec2 i = floor(p); vec2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                               mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+                }
+
+                vec2 droplet(vec2 uv, vec2 center, float radius, float idx) {
+                    vec2 delta = (uv - center) * uResolution / uResolution.y;
+                    float dist = length(delta);
+                    if (dist > radius) return vec2(0.0);
+                    float falloff = 1.0 - smoothstep(0.0, radius, dist);
+                    falloff *= falloff;
+                    // refraction: pull toward center
+                    float refract = falloff * 0.025;
+                    // vertical streak drag
+                    float streak = falloff * 0.012 * sin(idx * 13.7);
+                    return normalize(delta + 0.001) * refract + vec2(0.0, streak);
+                }
+
+                void main() {
+                    vec2 uv = vUv;
+                    float w = clamp(uWetness, 0.0, 1.0);
+                    vec2 offset = vec2(0.0);
+
+                    if (w > 0.01) {
+                        // 3 layers of droplets at different scales
+                        for (int l = 0; l < 3; l++) {
+                            float scale = 1.0 + float(l) * 0.5;
+                            vec2 grid = floor(uv * uResolution / 80.0 * scale + 0.5);
+                            for (int i = -1; i <= 1; i++) {
+                                for (int j = -1; j <= 1; j++) {
+                                    vec2 cell = grid + vec2(float(i), float(j));
+                                    float rng = hash(cell * (1.0 + float(l) * 7.3));
+                                    if (rng > 1.05 - 2.0 * w) continue;
+                                    vec2 center = (cell + vec2(hash(cell*3.7), hash(cell*9.1)) * 0.6)
+                                                  / (uResolution / 80.0 * scale);
+                                    float radius = 0.15 + hash(cell*5.9) * 0.35;
+                                    radius *= 0.6 + float(l) * 0.2;
+                                    offset += droplet(uv, center, radius, rng) * w;
+                                }
+                            }
+                        }
+                    }
+
+                    vec4 color = texture2D(tDiffuse, uv + offset * w);
+
+                    // moisture darkening at edges
+                    float vignette = 1.0 - smoothstep(0.3, 1.2, length(uv - 0.5) * 1.8) * 0.08 * w;
+                    color.rgb *= vignette;
+
+                    gl_FragColor = color;
+                }
+            `,
+        };
+
         function rebuildPostPipeline(cfg) {
             if (!renderer || isMobile) { composer = null; return; }
             if (!cfg.post) { composer = null; return; }
@@ -1629,6 +1860,17 @@
                 composer.addPass(filmPass);
                 window._film = filmPass;
             } catch (e) { console.warn('FilmPass failed, skip', e); }
+
+            // P20B-III: Wet Lens (W)
+            try {
+                const wetLensPass = new ShaderPass(WetLensShader);
+                wetLensPass.uniforms.uResolution.value = new THREE.Vector2(
+                    window.innerWidth * renderer.getPixelRatio(),
+                    window.innerHeight * renderer.getPixelRatio()
+                );
+                composer.addPass(wetLensPass);
+                window._wetLens = wetLensPass;
+            } catch (e) { console.warn('WetLensPass failed, skip', e); }
 
             outputPass = new OutputPass();
             composer.addPass(outputPass);
@@ -2847,39 +3089,70 @@
         // 场景全局雾
         scene.fog = new THREE.Fog(0x8899aa, 120, 450);
 
-        // 盆地低空雾平面
+        // P20B-III: Ground Fog (height-attenuated + FBM noise + wind drift)
         const fogGeo = new THREE.PlaneGeometry(500, 500);
-        fogGeo.rotateX(-Math.PI/2);
+        fogGeo.rotateX(-Math.PI / 2);
         const fogMat = new THREE.ShaderMaterial({
             uniforms: {
-                uTime: {value:0},
-                uColor: {value:new THREE.Color(0x8899bb)},
-                uFogColor: {value:new THREE.Color(0x8899aa)},
+                uTime: { value: 0 },
+                uColor: { value: new THREE.Color(0x8899bb) },
+                uFogColor: { value: new THREE.Color(0x8899aa) },
+                uMaxHeight: { value: 18 },
+                uDensity: { value: 0.35 },
+                uWind: { value: new THREE.Vector2(0, 0) },
             },
             vertexShader: `
-                varying vec3 vPos;
+                varying vec3 vWorldPos;
                 varying vec2 vUv;
                 void main() {
-                    vec4 wp = modelMatrix * vec4(position,1.0);
-                    vPos = wp.xyz;
+                    vec4 wp = modelMatrix * vec4(position, 1.0);
+                    vWorldPos = wp.xyz;
                     vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
                 }
             `,
             fragmentShader: `
-                varying vec3 vPos;
+                varying vec3 vWorldPos;
                 varying vec2 vUv;
-                uniform vec3 uColor;
-                uniform vec3 uFogColor;
+                uniform float uTime;
+                uniform vec3 uColor, uFogColor;
+                uniform float uMaxHeight, uDensity;
+                uniform vec2 uWind;
+
+                float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+                float noise(vec2 p) {
+                    vec2 i = floor(p); vec2 f = fract(p);
+                    f = f * f * (3.0 - 2.0 * f);
+                    return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                               mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
+                }
+                float fbm(vec2 p) {
+                    float sum = 0.0, amp = 1.0;
+                    for (int i = 0; i < 4; i++) {
+                        sum += noise(p) * amp;
+                        p *= 2.0; amp *= 0.5;
+                    }
+                    return sum / 1.875;
+                }
+
                 void main() {
-                    float dist = length(vPos.xz) * 0.004;
-                    float alpha = smoothstep(0.0, 0.35, dist) * smoothstep(1.2, 0.25, dist) * 0.28;
-                    float edgeFade = smoothstep(230.0, 250.0, length(vPos.xz)) * (1.0-smoothstep(0.0, 30.0, length(vPos.xz)));
-                    alpha *= edgeFade;
-                    // 盆地中心更浓
-                    float basin = 1.0 - smoothstep(0.0, 120.0, dist*250.0) * 0.4;
-                    alpha *= basin;
-                    gl_FragColor = vec4(mix(uFogColor, uColor, 0.6), alpha);
+                    // wind-driven noise offset
+                    vec2 noiseUv = vUv * 5.0 + uWind * uTime * 0.004;
+                    float n = fbm(noiseUv);
+                    n = smoothstep(0.3, 0.7, n);
+
+                    // height attenuation (quadratic: densest at ground, gone at maxHeight)
+                    float h = 1.0 - smoothstep(0.0, uMaxHeight, vWorldPos.y);
+                    h *= h;
+
+                    // spatial edge fade
+                    float dist = length(vWorldPos.xz) * 0.004;
+                    float edge = smoothstep(0.0, 0.35, dist) * smoothstep(1.2, 0.25, dist);
+                    float rim = smoothstep(230.0, 250.0, length(vWorldPos.xz))
+                              * (1.0 - smoothstep(0.0, 30.0, length(vWorldPos.xz)));
+
+                    float alpha = n * h * uDensity * edge * rim;
+                    gl_FragColor = vec4(mix(uFogColor, uColor, 0.5), alpha);
                 }
             `,
             transparent: true,
@@ -3009,6 +3282,7 @@
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
         setupFog();
         createRainSystem();
+        createSplashSystem();
         createLeafSystem();
         createSnowSystem();
 
@@ -3174,6 +3448,10 @@
                 uTime: { value: 0 },
                 uDayness: { value: 0.85 },
                 uSnowAmount: { value: 0 },
+                // P20A: 天气-水体耦合
+                uStormIntensity: { value: 0 },
+                uWindDirection: { value: new THREE.Vector2(1, 0) },
+                uWindSpeed: { value: 0 },
                 uCameraPos: { value: new THREE.Vector3() },
                 uEnvMap: { value: scene.environment || null },
                 uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.4) },
@@ -3191,6 +3469,10 @@
                 varying vec2 vReflectUV;
 
                 uniform float uTime;
+                // P20A: 天气-水体耦合
+                uniform float uStormIntensity;
+                uniform vec2 uWindDirection;
+                uniform float uWindSpeed;
                 uniform mat4 uReflectMatrix;
 
                 // Gerstner wave function
@@ -3226,24 +3508,34 @@
                     vec3 pos = position;
                     vec3 normal = vec3(0.0, 1.0, 0.0);
 
-                    // 8 Gerstner waves — varied directions, amplitudes, frequencies
-                    pos += gerstner(pos.xz, 0.18, vec2(1.0, 0.6),  0.35, 0.7, uTime);
-                    pos += gerstner(pos.xz, 0.13, vec2(-0.6, 1.0), 0.30, 0.9, uTime);
-                    pos += gerstner(pos.xz, 0.08, vec2(0.4, -0.85),0.45, 1.1, uTime);
-                    pos += gerstner(pos.xz, 0.06, vec2(-0.9, -0.3),0.50, 1.3, uTime);
-                    pos += gerstner(pos.xz, 0.04, vec2(0.7, -0.5), 0.40, 1.5, uTime);
-                    pos += gerstner(pos.xz, 0.03, vec2(-0.4, 0.75),0.55, 1.7, uTime);
-                    pos += gerstner(pos.xz, 0.02, vec2(0.2, -0.95),0.50, 1.9, uTime);
-                    pos += gerstner(pos.xz, 0.015,vec2(-0.7, -0.65),0.45, 2.1, uTime);
+                    // P20A: 天气调制系数（mysimulator风暴参数模型）
+                    float stormAmp   = 1.0 + uStormIntensity * 2.0;   // 平静→暴风雨：振幅最大 3x
+                    float stormSteep = 1.0 + uStormIntensity * 1.5;   // 波峰更尖锐
+                    float stormSpeed = 1.0 + uStormIntensity * 0.5;   // 波速加快
+                    // 主导波方向向风向靠拢（前2个振幅最大的波）
+                    float windBlend = uStormIntensity * 0.7;
+                    vec2 wind2d = uWindSpeed > 0.01 ? normalize(uWindDirection) : vec2(1.0, 0.6);
+                    vec2 domDir1 = mix(vec2(1.0, 0.6), wind2d, windBlend);
+                    vec2 domDir2 = mix(vec2(-0.6, 1.0), wind2d, windBlend * 0.8);
 
-                    normal += gerstnerNormal(pos.xz, 0.18, vec2(1.0, 0.6),  0.35, 0.7, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.13, vec2(-0.6, 1.0), 0.30, 0.9, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.08, vec2(0.4, -0.85),0.45, 1.1, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.06, vec2(-0.9, -0.3),0.50, 1.3, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.04, vec2(0.7, -0.5), 0.40, 1.5, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.03, vec2(-0.4, 0.75),0.55, 1.7, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.02, vec2(0.2, -0.95),0.50, 1.9, uTime);
-                    normal += gerstnerNormal(pos.xz, 0.015,vec2(-0.7, -0.65),0.45, 2.1, uTime);
+                    // 8 Gerstner waves — 天气调制振幅/陡度/速度
+                    pos += gerstner(pos.xz, 0.18 * stormAmp, domDir1,              0.35 * stormSteep, 0.7 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.13 * stormAmp, domDir2,              0.30 * stormSteep, 0.9 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.08 * stormAmp, vec2(0.4, -0.85),     0.45 * stormSteep, 1.1 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.06 * stormAmp, vec2(-0.9, -0.3),     0.50 * stormSteep, 1.3 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.04 * stormAmp, vec2(0.7, -0.5),      0.40 * stormSteep, 1.5 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.03 * stormAmp, vec2(-0.4, 0.75),     0.55 * stormSteep, 1.7 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.02 * stormAmp, vec2(0.2, -0.95),     0.50 * stormSteep, 1.9 * stormSpeed, uTime);
+                    pos += gerstner(pos.xz, 0.015* stormAmp, vec2(-0.7, -0.65),    0.45 * stormSteep, 2.1 * stormSpeed, uTime);
+
+                    normal += gerstnerNormal(pos.xz, 0.18 * stormAmp, domDir1,              0.35 * stormSteep, 0.7 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.13 * stormAmp, domDir2,              0.30 * stormSteep, 0.9 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.08 * stormAmp, vec2(0.4, -0.85),     0.45 * stormSteep, 1.1 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.06 * stormAmp, vec2(-0.9, -0.3),     0.50 * stormSteep, 1.3 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.04 * stormAmp, vec2(0.7, -0.5),      0.40 * stormSteep, 1.5 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.03 * stormAmp, vec2(-0.4, 0.75),     0.55 * stormSteep, 1.7 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.02 * stormAmp, vec2(0.2, -0.95),     0.50 * stormSteep, 1.9 * stormSpeed, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.015* stormAmp, vec2(-0.7, -0.65),    0.45 * stormSteep, 2.1 * stormSpeed, uTime);
                     normal = normalize(normal);
 
                     vWorldPos = pos;
@@ -3269,6 +3561,10 @@
                 uniform float uTime;
                 uniform float uDayness;
                 uniform float uSnowAmount;
+                // P20A: 天气-水体耦合
+                uniform float uStormIntensity;
+                uniform vec2 uWindDirection;
+                uniform float uWindSpeed;
                 uniform sampler2D uEnvMap;
                 uniform vec3 uSunDir;
                 uniform float uWaterLevel;
@@ -3313,6 +3609,10 @@
                     vec3 nightWater = waterColor * vec3(0.6, 0.5, 0.55);
                     waterColor = mix(nightWater, dayWater, uDayness);
 
+                    // P20A: 风暴水面变暗变灰（mysimulator Storm 效果）
+                    vec3 stormWater = vec3(0.08, 0.12, 0.18);
+                    waterColor = mix(waterColor, stormWater, uStormIntensity * 0.55);
+
                     // --- 冬季冰冻 ---
                     float ice = uSnowAmount;
                     vec3 iceColor = vec3(0.7, 0.78, 0.85);
@@ -3328,11 +3628,11 @@
                     specColor *= (1.0 - ice * 0.8);
 
                     // --- 泡沫 ---
-                    float foamThreshold = 0.08 + ice * 0.05;
+                    float foamThreshold = 0.08 + ice * 0.05 - uStormIntensity * 0.05;
                     float foamMask = smoothstep(foamThreshold, foamThreshold + 0.06, vWaveHeight - uWaterLevel);
                     vec3 foamColor = vec3(0.9, 0.92, 0.95);
-                    // 冬季泡沫变少
-                    foamMask *= (1.0 - ice * 0.5);
+                    // 冬季泡沫变少，风暴白浪增多
+                    foamMask *= (1.0 - ice * 0.5 + uStormIntensity * 1.2);
 
                     // --- 高频法线细节（程序化涟漪） ---
                     float ripple = 0.0;
@@ -3344,14 +3644,16 @@
                     rippleFresnel = clamp(rippleFresnel - ice * 0.2, 0.0, 1.0);
 
                     // --- 合成 ---
-                    vec3 color = mix(waterColor, reflectColor, rippleFresnel);
+                    // P20A: 风暴下反射减弱（波涛汹涌散射反射）
+                    float stormFresnel = rippleFresnel * (1.0 - uStormIntensity * 0.2);
+                    vec3 color = mix(waterColor, reflectColor, stormFresnel);
                     color += specColor;
                     color = mix(color, foamColor, foamMask * 0.7);
 
                     // --- 透明度：边缘透明 ---
                     float alpha = 0.88;
-                    // 冬季冰面更不透明
-                    alpha = mix(alpha, 0.95, ice * 0.5);
+                    // 冬季冰面更不透明，风暴更不透明
+                    alpha = mix(alpha, 0.95, max(ice, uStormIntensity) * 0.5);
 
                     gl_FragColor = vec4(color, alpha);
                 }
@@ -3467,6 +3769,13 @@
         mat.uniforms.uTime.value = WATER.time;
         mat.uniforms.uDayness.value = DAYNIGHT.dayness;
         mat.uniforms.uSnowAmount.value = SEASON.lerped.snowAmount;
+        // P20A: 天气-水体耦合 — 传递风暴强度/风向/风速
+        const w = WEATHER.lerped;
+        const stormIntensity = Math.min(1.0, w.rainIntensity * 0.85 + w.lightningFreq * 0.3 + w.windSpeed * 0.15);
+        mat.uniforms.uStormIntensity.value = stormIntensity;
+        const windDir = WEATHER.wind.dir.clone();
+        mat.uniforms.uWindDirection.value.set(windDir.x, windDir.z);
+        mat.uniforms.uWindSpeed.value = WEATHER.lerped.windSpeed;
         mat.uniforms.uCameraPos.value.copy(camera.position);
         // 太阳方向（从天穹着色器复用逻辑）
         const sd = window._sun ? window._sun.position.clone().normalize() : new THREE.Vector3(0.5, 0.8, 0.4);
@@ -3913,6 +4222,7 @@
             updatePedestrians(dt);
         }
         updateRainSystem(dt);
+        updateSplashSystem(dt);
         updateLeafSystem(dt);
         updateSnowSystem(dt);
         updateTrees(dt);
@@ -3935,6 +4245,13 @@
             window._film.uniforms.uTime.value = clock.elapsedTime;
         }
 
+        // P20B-III: Wet Lens update
+        if (window._wetLens) {
+            const wp = window._wetLens.uniforms;
+            wp.uTime.value = clock.elapsedTime;
+            wp.uWetness.value = WEATHER.lerped.wetness || 0;
+        }
+
         // P19: 每帧渲染反射贴图（先于主渲染，确保建筑/天空被镜像相机捕获）
         renderReflection();
 
@@ -3944,7 +4261,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.0 P19 | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.3 P20B-III | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
