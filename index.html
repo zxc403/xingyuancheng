@@ -995,10 +995,15 @@
     function rand(min,max) { return min+Math.random()*(max-min); }
     function randInt(min,max) { return Math.floor(rand(min,max+0.999)); }
 
+    // P7: 建筑记录（供 LOD 系统使用）
+    const buildingRecords = [];
+    window._buildingRecords = buildingRecords;
+
     function buildBuildings() {
         const bldGroup = new THREE.Group();
         bldGroup.name = 'buildings';
         const seed = 42;
+        buildingRecords.length = 0;
 
         // 简易伪随机（确定性，避免每次刷新不同）
         let s = seed;
@@ -1019,6 +1024,9 @@
             const cx = plot.cx + rnd(-0.3,0.3)*(plot.w-bw);
             const cz = plot.cz + rnd(-0.3,0.3)*(plot.d-bd);
             const baseY = getTerrainH(cx, cz);
+
+            // P7: 记录建筑数据供 LOD 系统使用
+            buildingRecords.push({cx, cz, totalH, bw, bd, baseY, dist});
 
             // 建筑分段（底座+主体+顶冠）
             const segments = [];
@@ -1105,6 +1113,99 @@
         scene.add(bldGroup);
         window._bldGroup = bldGroup;
         return bldGroup.children.length;
+    }
+
+    // ===== P7: LOD 系统 + InstancedMesh 批量渲染 =====
+    function buildLODLevels() {
+        const refGeo = new THREE.BoxGeometry(1, 1, 1);
+        const lod1ColorMap = {A:0x667788, B:0xbbaa88, C:0x554433, D:0x887766};
+        window._lod1Meshes = {};
+        window._lod2Points = null;
+
+        // ---- LOD 1: InstancedMesh 简化单体 (200m~700m) ----
+        const lod1ByDist = {A:[], B:[], C:[], D:[]};
+        for (const rec of buildingRecords) {
+            lod1ByDist[rec.dist].push(rec);
+        }
+
+        for (const [dist, recs] of Object.entries(lod1ByDist)) {
+            if (recs.length === 0) continue;
+            const mat = new THREE.MeshStandardMaterial({
+                color: lod1ColorMap[dist], roughness: 0.75, metalness: 0.15,
+                flatShading: false
+            });
+            const im = new THREE.InstancedMesh(refGeo, mat, recs.length);
+            im.name = 'lod1_' + dist;
+            im.castShadow = true;
+            im.receiveShadow = true;
+            im.frustumCulled = false;
+            im.visible = false; // LOD 0 默认可见
+
+            const dummy = new THREE.Object3D();
+            recs.forEach((rec, i) => {
+                dummy.position.set(rec.cx, rec.baseY + rec.totalH * 0.5, rec.cz);
+                dummy.scale.set(rec.bw, rec.totalH, rec.bd);
+                dummy.updateMatrix();
+                im.setMatrixAt(i, dummy.matrix);
+            });
+            im.instanceMatrix.needsUpdate = true;
+            scene.add(im);
+            window._lod1Meshes[dist] = im;
+        }
+
+        // ---- LOD 2: Points 远距离光点 (>700m) ----
+        const allCenters = buildingRecords.map(r => [
+            r.cx, r.baseY + r.totalH + 0.5, r.cz
+        ]).flat();
+        const ptsGeo = new THREE.BufferGeometry();
+        ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(allCenters, 3));
+        const ptsMat = new THREE.PointsMaterial({
+            color: 0xffddaa, size: 1.8,
+            transparent: true, opacity: 0.75,
+            depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        const pts = new THREE.Points(ptsGeo, ptsMat);
+        pts.name = 'lod2';
+        pts.visible = false;
+        pts.frustumCulled = false;
+        scene.add(pts);
+        window._lod2Points = pts;
+
+        window._lodLevel = 0; // 当前激活的 LOD 级别
+        console.log('P7 LOD built: ' + getLODStats());
+    }
+
+    function updateLOD() {
+        const camPos = camera.position;
+        const lod0Group = window._bldGroup;
+        const lod1Meshes = window._lod1Meshes || {};
+        const lod2Pts = window._lod2Points;
+        if (!lod0Group) return;
+
+        // 计算相机到城市中心的距离
+        const distToCenter = Math.sqrt(camPos.x*camPos.x + camPos.z*camPos.z);
+        const LOD0_MAX = 250, LOD1_MAX = 700;
+
+        let newLevel;
+        if (distToCenter < LOD0_MAX)        newLevel = 0;
+        else if (distToCenter < LOD1_MAX)   newLevel = 1;
+        else                                newLevel = 2;
+
+        // 防抖：切换后至少保持 0.5 秒
+        if (newLevel !== window._lodLevel) {
+            window._lodLevel = newLevel;
+            lod0Group.visible = (newLevel === 0);
+            for (const im of Object.values(lod1Meshes)) im.visible = (newLevel === 1);
+            if (lod2Pts) lod2Pts.visible = (newLevel === 2);
+        }
+    }
+
+    function getLODStats() {
+        const lod0 = window._bldGroup ? window._bldGroup.children.length : 0;
+        let lod1 = 0;
+        for (const im of Object.values(window._lod1Meshes || {})) lod1 += im.count;
+        const lod2 = window._lod2Points ? window._lod2Points.geometry.attributes.position.count : 0;
+        return 'LOD0:' + lod0 + ' meshes | LOD1:' + lod1 + ' instanced | LOD2:' + lod2 + ' pts';
     }
 
     // ===== P5: 立面纹理 + 街道家具 + 雾层 =====
@@ -1640,6 +1741,7 @@
             if (dayProgress >= 1.0) dayProgress -= 1.0;
             updateDayNight(dayProgress);
         }
+        updateLOD(); // P7: LOD 切换
         updateCamera();
 
         if (window._skyDome) window._skyDome.material.uniforms.uTime.value += dt;
@@ -1743,6 +1845,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
