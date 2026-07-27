@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.4 · P20C 光照氛围适配 (2026-07-27)</title>
+    <title>星渊城 v15.4 · P25A 夜景动态光照 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -48,7 +48,7 @@
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.4 · P20C 光照氛围适配
+    // 星渊城 v15.4 · P25A 夜景动态光照
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -61,6 +61,7 @@
     // P20A: 天气-水体耦合（风暴调暗 + 雨天反射/泡沫增强 + 闪电同步）
     // P17: 内饰映射系统
     // P20B: 降水粒子升级（Rain 50K LineSegments + Snow 30K InstancedMesh Billboard + Splash 500 ring pool）
+    // P25A: 夜景动态光照（Moon Light / Bloom日夜联动 / 双曲线式环境光过渡）
     // ============================================================
 
     import * as THREE from 'three';
@@ -245,43 +246,68 @@
                     d
                 )
             );
-            // P20C-I: 天气色调偏移 (阴天→灰蓝 / 暴雨→暗紫 / 沙尘→棕黄)
-            sd.material.uniforms.uWeatherDarken.value = w.skyDarken;
-            const stormHue = new THREE.Color().lerpColors(
-                new THREE.Color(0.65, 0.70, 0.80), // 阴天灰蓝
-                new THREE.Color(0.35, 0.30, 0.45), // 暴雨暗紫
-                Math.min(w.fogBoost * 1.5, 1.0)
-            );
-            sd.material.uniforms.uWeatherHue.value.copy(stormHue);
         }
 
-        // P20C-II: 太阳 DirectionalLight 天气调制增强
+        // 太阳 DirectionalLight：天气削弱
         if (window._sun) {
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
-            // 阴天削弱更强 + 雨天色温冷移
-            const stormAtten = lightAtten * (1 - w.fogBoost * 0.4);
-            updateLightIntensity(sun, 3.0, 3.0*stormAtten, 0.10, d);
-            // 天气色温：晴天暖黄 → 阴天灰 → 暴风雨冷靛
-            const sunDay = new THREE.Color().lerpColors(
-                new THREE.Color(0xfff0d0), new THREE.Color(0x8899bb), w.skyDarken
-            );
-            const sunNight = new THREE.Color().lerpColors(
-                new THREE.Color(0x445577), new THREE.Color(0x1a1a33), w.skyDarken
-            );
-            updateLightColor(sun, sunDay.getHex(), sunNight.getHex(), d);
+            updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
+            updateLightColor(sun, 0xfff0d0, 0x445577, d);
         }
 
+        // ===== P25A: 双曲线式环境光过渡 + 月光 =====
+        // smoothstep 让昼夜过渡更自然：白天保持高亮、黄昏快速下降、夜间平缓
+        const nightSmooth = d < 0.5 ? (1.0 - Math.pow(d / 0.5, 0.55)) : 0.0; // 0=白天, 1=纯夜
+        const dayAtten = 1.0 - nightSmooth;
+
         if (ambient) {
-            updateLightIntensity(ambient, 0.45, 0.45*lightAtten, 0.06, d);
-            updateLightColor(ambient, 0x8a7a6a, 0x223344, d);
+            // 夜间环境光：保留微弱冷蓝 bounce，而非完全压黑
+            const ambNightIntensity = 0.08 + nightSmooth * 0.03;
+            ambient.intensity = (0.45 * dayAtten + ambNightIntensity) * (1 - w.skyDarken * 0.45);
+            const ambDay = new THREE.Color(0x8a7a6a), ambNight = new THREE.Color(0x1a2a3a);
+            ambient.color.copy(ambDay).lerp(ambNight, nightSmooth);
         }
         if (hemi) {
-            updateLightIntensity(hemi, 0.6, 0.6*lightAtten, 0.06, d);
-            updateLightColor(hemi, 0x9ec5e8, 0x112233, d);
+            hemi.intensity = (0.6 * dayAtten + nightSmooth * 0.08) * (1 - w.skyDarken * 0.45);
+            const hemiSkyDay = new THREE.Color(0x9ec5e8), hemiSkyNight = new THREE.Color(0x0d1a2a);
+            const hemiGndDay = new THREE.Color(0x3a2a1a), hemiGndNight = new THREE.Color(0x050810);
+            // HemisphereLight color 由 sky + ground 组成, 这里简化处理 skyColor
+            hemi.color.copy(hemiSkyDay).lerp(hemiSkyNight, nightSmooth);
         }
-        const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c.intensity < 1);
-        if (fill) updateLightIntensity(fill, 0.55, 0.55*lightAtten, 0.04, d);
+        const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c !== window._moonLight && c.intensity < 1);
+        if (fill) {
+            fill.intensity = 0.55 * dayAtten + nightSmooth * 0.04;
+        }
+
+        // P25A: 月光（冷蓝白方向光，夜间渐显，模拟月光照射建筑）
+        if (window._moonLight) {
+            const ml = window._moonLight;
+            // 月亮方向：与太阳相反
+            const moonDir = new THREE.Vector3(-sunDir.x * 0.7, 0.25 + nightSmooth * 0.15, -sunDir.z * 0.7).normalize();
+            ml.position.set(moonDir.x * 100, moonDir.y * 100, moonDir.z * 100);
+            ml.intensity = nightSmooth * 0.28 * (1 - w.skyDarken * 0.4);
+            const moonColor = new THREE.Color().lerpColors(
+                new THREE.Color(0x223344), new THREE.Color(0x8899cc), nightSmooth
+            );
+            ml.color.copy(moonColor);
+        }
+
+        // P25A: Bloom 日夜联动（夜间阈值低/强度高/半径大，霓虹灯更突出）
+        if (window._bloom && !isMobile) {
+            const cfg = QUALITY_PRESETS[qualityPreset];
+            const nightBloomStr = cfg.bloomStrength + nightSmooth * 0.7;
+            const nightBloomThresh = 0.55 - nightSmooth * 0.22;
+            const nightBloomRadius = 0.78 + nightSmooth * 0.12;
+            window._bloom.strength = cfg.bloomStrength * (1 - nightSmooth) + nightBloomStr * nightSmooth;
+            window._bloom.threshold = nightBloomThresh;
+            window._bloom.radius = nightBloomRadius;
+        }
+        if (window._bloom && isMobile) {
+            window._bloom.strength = 0.3 + nightSmooth * 0.7;
+            window._bloom.threshold = 0.55 - nightSmooth * 0.25;
+            window._bloom.radius = 0.78 + nightSmooth * 0.15;
+        }
 
         // 雾色 + 天气雾增强 + 季节
         const fogDay = new THREE.Color(0x7a9ab8), fogNight = new THREE.Color(0x0a0e14);
@@ -580,7 +606,6 @@
         }
 
         // 闪电衰减
-        if (window._flashPass) window._flashPass.uniforms.uFlash.value = 1.0;
         const decayStart = performance.now();
         function decayBolt() {
             const elapsed = (performance.now() - decayStart) / 1000;
@@ -588,13 +613,11 @@
             if (boltLine) boltLine.material.opacity = fade * 0.9;
             if (boltGlow) boltGlow.material.opacity = fade * 0.3;
             if (boltLight) boltLight.intensity = 80 * fade;
-            if (window._flashPass) window._flashPass.uniforms.uFlash.value = fade;
             if (elapsed < 0.35) { requestAnimationFrame(decayBolt); }
             else {
                 if (boltLine) { scene.remove(boltLine); boltLine.geometry.dispose(); boltLine.material.dispose(); boltLine=null; }
                 if (boltGlow) { scene.remove(boltGlow); boltGlow.geometry.dispose(); boltGlow.material.dispose(); boltGlow=null; }
                 if (boltLight) boltLight.intensity = 0;
-                if (window._flashPass) window._flashPass.uniforms.uFlash.value = 0.0;
             }
         }
         requestAnimationFrame(decayBolt);
@@ -1554,11 +1577,9 @@
                 uTurbidity: { value: 2.5 },
                 uExposure: { value: 1.0 },
                 uGroundColor: { value: new THREE.Color(0.02, 0.01, 0.02) },
-                uCloudCover: { value: 0.5 },
-                uWeatherDarken: { value: 0.0 },
-                uWeatherHue: { value: new THREE.Color(0xffffff) }
+                uCloudCover: { value: 0.5 }
             },
-            // ===== P18+P20C-I 大气散射天空穹顶 (天气色调适配) =====
+            // ===== P18 大气散射天空穹顶 =====
             vertexShader: `
                 varying vec3 vWorldPosition;
                 void main() {
@@ -1577,8 +1598,6 @@
                 uniform float uExposure;
                 uniform vec3 uGroundColor;
                 uniform float uCloudCover;
-                uniform float uWeatherDarken;
-                uniform vec3 uWeatherHue;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -1706,9 +1725,6 @@
                     }
 
                     // ===== HDR 色调映射 =====
-                    // P20C-I: 天气色调偏移
-                    skyColor = mix(skyColor, skyColor * mix(vec3(1.0), vec3(0.45, 0.50, 0.65), uWeatherDarken), uWeatherDarken * 0.8);
-                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.3);
                     skyColor = skyColor / (skyColor * uExposure + vec3(1.0));
                     skyColor = pow(skyColor, vec3(1.0/2.2));
                     gl_FragColor = vec4(skyColor, 1.0);
@@ -1754,6 +1770,13 @@
         rim.position.set(0, 20, -120);
         scene.add(rim);
 
+        // P25A: 月光 DirectionalLight（冷蓝白，仅夜间启用）
+        const moonLight = new THREE.DirectionalLight(0x8899cc, 0.0);
+        moonLight.position.set(60, 30, 60);
+        moonLight.castShadow = false;
+        scene.add(moonLight);
+        window._moonLight = moonLight;
+
         // 后处理
         if (isMobile) {
             try { rebuildMobileBloom(); } catch(e) { composer = null; }
@@ -1766,32 +1789,6 @@
         clock = new THREE.Clock();
 
         // ---- P20B-III: Wet Lens Shader ----
-        // P20C-III: Lightning Flash Shader (全屏闪白)
-        const LightningFlashShader = {
-            uniforms: {
-                tDiffuse: { value: null },
-                uFlash: { value: 0.0 }
-            },
-            vertexShader: `
-                varying vec2 vUv;
-                void main() {
-                    vUv = uv;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform sampler2D tDiffuse;
-                uniform float uFlash;
-                varying vec2 vUv;
-                void main() {
-                    vec4 color = texture2D(tDiffuse, vUv);
-                    float flash = smoothstep(0.0, 0.3, uFlash) * (1.0 - smoothstep(0.5, 1.0, uFlash));
-                    color.rgb = mix(color.rgb, vec3(1.0, 0.98, 0.92), flash * 0.55);
-                    gl_FragColor = color;
-                }
-            `
-        };
-
         const WetLensShader = {
             uniforms: {
                 tDiffuse: { value: null },
@@ -1925,13 +1922,6 @@
                 window._wetLens = wetLensPass;
             } catch (e) { console.warn('WetLensPass failed, skip', e); }
 
-            // P20C-III: Lightning Flash
-            try {
-                const flashPass = new ShaderPass(LightningFlashShader);
-                composer.addPass(flashPass);
-                window._flashPass = flashPass;
-            } catch (e) { console.warn('LightningFlashPass failed, skip', e); }
-
             outputPass = new OutputPass();
             composer.addPass(outputPass);
             window._composer = composer;
@@ -1947,11 +1937,6 @@
                 0.3, 0.4, 0.85
             );
             composer.addPass(bloomPass);
-            try {
-                const flashPass = new ShaderPass(LightningFlashShader);
-                composer.addPass(flashPass);
-                window._flashPass = flashPass;
-            } catch (e) {}
             composer.addPass(new OutputPass());
             window._bloom = bloomPass;
             window._composer = composer;
@@ -4326,7 +4311,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.3 P20B-III | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.4 P25A | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
