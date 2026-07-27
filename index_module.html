@@ -3131,6 +3131,91 @@
     }
 
 
+    // ====== MODULE: Window Lights (P25C) ======
+    // ===== P25C: 窗户光照系统 (World-Space UV Grid + Emissive) =====
+    // 基于 onBeforeCompile 注入，DC=0，纯 Shader 逐窗 Hash 亮灭/色温/亮度
+    window._windowLightRefs = [];
+    window._p25cActive = true;
+
+    const WL_DECL = `
+varying vec3 wlWorldPos;
+varying vec3 wlNormal;
+uniform float wlNight;
+uniform vec3 wlSeed;
+
+float wl_hash3(vec3 p) { float h = dot(p, vec3(127.1, 311.7, 74.7)); return fract(sin(h) * 43758.5453123); }
+float wl_hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+`;
+
+    const WL_VERT = `
+vec4 wl_wp = modelMatrix * vec4(position, 1.0);
+wlWorldPos = wl_wp.xyz;
+wlNormal = normalize(mat3(modelMatrix) * normal);
+`;
+
+    const WL_EMIT = `
+if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
+    vec2 wallUV = abs(wlNormal.x) > abs(wlNormal.z) ? vec2(wlWorldPos.z, wlWorldPos.y) : vec2(wlWorldPos.x, wlWorldPos.y);
+    float cw = 3.4 + wl_hash3(wlSeed + vec3(1.0,0.0,0.0)) * 0.7;
+    float ch = 3.8 + wl_hash3(wlSeed + vec3(0.0,1.0,0.0)) * 0.9;
+    vec2 cellUV = wallUV / vec2(cw, ch);
+    vec2 cellIdx = floor(cellUV);
+    vec2 cellFrac = fract(cellUV);
+    vec2 center = cellFrac - 0.5;
+    float margin = 0.07 + wl_hash2(cellIdx + wlSeed.xy * 0.37) * 0.05;
+    float inside = 1.0 - smoothstep(0.30 - margin, 0.38, max(abs(center.x), abs(center.y)));
+    if (inside > 0.0) {
+        float hs = wl_hash2(cellIdx + wlSeed.xy * 13.0);
+        if (hs < 0.58) {
+            float ct = wl_hash2(cellIdx + wlSeed.xy * 29.0);
+            float bt = 0.3 + wl_hash2(cellIdx + wlSeed.xy * 41.0) * 0.5;
+            vec3 wc = ct < 0.18 ? vec3(0.55,0.68,0.95) : (ct > 0.88 ? vec3(0.25,0.35,0.88) : vec3(1.0,0.82,0.48));
+            if (ct > 0.88) bt *= 0.65;
+            float hb = smoothstep(0.0, 45.0, wlWorldPos.y) * 0.15;
+            totalEmissiveRadiance += wc * (bt + hb) * inside * wlNight;
+        }
+    }
+}
+`;
+
+    function injectWindowLights(material, worldPos) {
+        if (material.userData._wlInjected) return;
+        material.userData._wlInjected = true;
+        material.onBeforeCompile = (shader) => {
+            shader.uniforms.wlNight = { value: 0.0 };
+            shader.uniforms.wlSeed  = { value: new THREE.Vector3(worldPos.x * 0.37, worldPos.z * 0.37, 0.5) };
+            shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\n' + WL_DECL);
+            shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + WL_VERT);
+            shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + WL_EMIT);
+            window._windowLightRefs.push({ uniforms: shader.uniforms, material: material });
+        };
+        material.needsUpdate = true;
+    }
+
+    function createWindowLights() {
+        if (!window._bldMeshes) return 0;
+        let count = 0;
+        for (const bm of window._bldMeshes) {
+            if (!bm.mesh || !bm.mesh.material) continue;
+            const mats = Array.isArray(bm.mesh.material) ? bm.mesh.material : [bm.mesh.material];
+            for (const mat of mats) {
+                if ((mat.isMeshStandardMaterial || mat.isMeshPhongMaterial) && !mat.userData._wlInjected) {
+                    injectWindowLights(mat, bm.mesh.position);
+                    count++;
+                }
+            }
+        }
+        console.log('[P25C] 窗户光照注入 ' + count + ' 个材质 (' + window._windowLightRefs.length + ' 个 shader)');
+        return count;
+    }
+
+    function updateWindowLights(dt) {
+        const night = window._nightSmooth || 0.0;
+        for (const ref of window._windowLightRefs) {
+            if (ref.uniforms && ref.uniforms.wlNight !== undefined) ref.uniforms.wlNight.value = night;
+        }
+    }
+
     // ====== MODULE: Pedestrian System ======
     // ===== P10: 行人系统 =====
     const pedestrianStates = [];    // {segIdx, t, speed, state, idleTimer, colorIdx, phase}
@@ -3573,6 +3658,9 @@
         const bldCount = buildBuildings();
         console.log(`[P4] 建筑: ${bldCount} 个网格体, P17 内饰窗户: ${window._interiorWindows.length}`);
 
+        // ---- P25C: 窗户光照系统 (World-Space UV Grid, 逐窗 Hash 亮灭) ----
+        createWindowLights();
+
         // ---- P5: 街道家具 + 雾层 ----
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
@@ -3767,6 +3855,7 @@
         updateWater(dt);
         updateAtmosphere(dt);
         updateNeonSystem(dt);
+        updateWindowLights(dt);
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -3799,7 +3888,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.5 P25B | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.6 P25C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -3896,7 +3985,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v14.0 P18 体积大气 加载完成');
+    console.log('星渊城 v15.6 P25C 窗格发光 加载完成');
     // ====== MODULE: Water + Reflection + Atmosphere ======
     // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     const WATER = {
