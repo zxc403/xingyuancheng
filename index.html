@@ -637,6 +637,20 @@
     // 全局道路段存储：{x1,z1,x2,z2,w} 每条为一段
     const roadSegments = [];
 
+    // ===== P9: 载具交通系统 =====
+    const vehicleSegments = [];   // {start:{x,z}, end:{x,z}, len, dirX, dirZ, nx, nz, w, nextIdx:[]}
+    const vehicleInstances = [];  // {vType, segIdx, progress, speed, targetSpeed, colorHex, instanceIdx}
+    const VEHICLE_TYPES = {
+        0: { name:'sedan', body:[1.6,0.35,0.85], cabin:[0.7,0.25,0.8], cabinOffY:0.06, color:'#8899bb', count:45 },
+        1: { name:'suv',   body:[1.9,0.42,1.0],  cabin:[0.85,0.30,0.95],cabinOffY:0.08, color:'#bbaa88', count:35 },
+        2: { name:'truck', body:[2.3,0.50,0.95], cabin:[0.5,0.45,0.9], cabinOffY:0.02, color:'#776655', count:20 }
+    };
+    let vehicleBodyIM = {};       // {0:InstancedMesh, 1:..., 2:...}
+    let vehicleHeadlightIM = {};  // headlight indicator IM per type
+    let vehicleTaillightIM = {};  // taillight indicator IM per type
+    let vehicleHeadlightMat = {}; // material ref for emissive control
+    let vehicleTaillightMat = {};
+
     // 四区关键节点（城市骨架点）
     const NODES = [
         {id:'A_center', x:90, z:100, label:'上城CBD'},
@@ -1492,6 +1506,307 @@
         return furnGroup.children.length;
     }
 
+    // ===== P9: 载具交通系统 =====
+    function buildVehicleGraph() {
+        vehicleSegments.length = 0;
+        // 只取主干道(w>=7)作为行驶道路
+        for (const s of roadSegments) {
+            if (s.w < 7) continue;
+            const dx = s.x2 - s.x1, dz = s.z2 - s.z1;
+            const len = Math.sqrt(dx*dx + dz*dz);
+            if (len < 6) continue;
+            vehicleSegments.push({
+                start: {x:s.x1, z:s.z1},
+                end:   {x:s.x2, z:s.z2},
+                len, dirX: dx/len, dirZ: dz/len,
+                nx: -dz/len, nz: dx/len, w: s.w,
+                nextIdx: []
+            });
+        }
+        // 建立相邻关系：共享端点且方向不反向
+        const TOL = 3;
+        for (let i=0; i<vehicleSegments.length; i++) {
+            const a = vehicleSegments[i];
+            for (let j=0; j<vehicleSegments.length; j++) {
+                if (i===j) continue;
+                const b = vehicleSegments[j];
+                const dEE = Math.hypot(a.end.x-b.end.x, a.end.z-b.end.z);
+                const dES = Math.hypot(a.end.x-b.start.x, a.end.z-b.start.z);
+                if (dES < TOL) {
+                    const dot = a.dirX*b.dirX + a.dirZ*b.dirZ;
+                    if (dot > -0.5) a.nextIdx.push({idx:j, fromStart:true, turnAngle:Math.acos(U.clamp(dot,-1,1))});
+                }
+            }
+        }
+        console.log('[P9] Vehicle graph: ' + vehicleSegments.length + ' segments');
+    }
+
+    function buildVehicleTraffic() {
+        buildVehicleGraph();
+        if (vehicleSegments.length === 0) return 0;
+
+        // 为每种车型创建 InstancedMesh
+        for (let vType=0; vType<3; vType++) {
+            const cfg = VEHICLE_TYPES[vType];
+            const n = cfg.count;
+
+            // ---- 车身几何（简化为单体 Box，总高=车身+车顶） ----
+            const totalH = cfg.body[1] + cfg.cabin[1] + cfg.cabinOffY + 0.05;
+            const bodyGeo = new THREE.BoxGeometry(cfg.body[0], totalH, cfg.body[2]);
+            bodyGeo.translate(0, totalH/2, 0);
+
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(cfg.color), roughness: 0.35, metalness: 0.4,
+                envMapIntensity: 0.8
+            });
+            const im = new THREE.InstancedMesh(bodyGeo, bodyMat, n);
+            im.name = 'vehicleBody_' + cfg.name;
+            im.castShadow = true;
+            im.receiveShadow = true;
+            im.frustumCulled = false;
+            scene.add(im);
+            vehicleBodyIM[vType] = im;
+
+            // ---- 头灯几何（前端小发光块） ----
+            const hlGeo = new THREE.BoxGeometry(0.12, 0.08, cfg.body[2]*0.55);
+            const hlMat = new THREE.MeshStandardMaterial({
+                color: 0xffffcc, roughness: 0.1, metalness: 0.1,
+                emissive: 0xffdd88, emissiveIntensity: 0.0
+            });
+            vehicleHeadlightMat[vType] = hlMat;
+            const hlIM = new THREE.InstancedMesh(hlGeo, hlMat, n);
+            hlIM.name = 'vehicleHL_' + cfg.name;
+            hlIM.frustumCulled = false;
+            scene.add(hlIM);
+            vehicleHeadlightIM[vType] = hlIM;
+
+            // ---- 尾灯几何（后端小红块） ----
+            const tlGeo = new THREE.BoxGeometry(0.12, 0.06, cfg.body[2]*0.5);
+            const tlMat = new THREE.MeshStandardMaterial({
+                color: 0xff2222, roughness: 0.1, metalness: 0.1,
+                emissive: 0xff0000, emissiveIntensity: 0.0
+            });
+            vehicleTaillightMat[vType] = tlMat;
+            const tlIM = new THREE.InstancedMesh(tlGeo, tlMat, n);
+            tlIM.name = 'vehicleTL_' + cfg.name;
+            tlIM.frustumCulled = false;
+            scene.add(tlIM);
+            vehicleTaillightIM[vType] = tlIM;
+        }
+
+        // 在主干道上生成车辆实例
+        vehicleInstances.length = 0;
+        const dummy = new THREE.Object3D();
+        let totalInst = 0;
+        let globalIdx = 0;
+
+        for (let vType=0; vType<3; vType++) {
+            const cfg = VEHICLE_TYPES[vType];
+            const im = vehicleBodyIM[vType];
+            const hlIM = vehicleHeadlightIM[vType];
+            const tlIM = vehicleTaillightIM[vType];
+
+            for (let i=0; i<cfg.count; i++) {
+                // 随机选一条主干道段
+                const segIdx = Math.floor(Math.random() * vehicleSegments.length);
+                const seg = vehicleSegments[segIdx];
+                const progress = 0.1 + Math.random() * 0.8;
+                const speed = 2 + Math.random() * (vType===2?3:5); // 卡车慢
+
+                // 世界坐标
+                const wx = seg.start.x + seg.dirX * seg.len * progress;
+                const wz = seg.start.z + seg.dirZ * seg.len * progress;
+                const wy = (getTerrainH(seg.start.x,seg.start.z)+getTerrainH(seg.end.x,seg.end.z))/2 + 0.3;
+                const angle = Math.atan2(seg.dirX, seg.dirZ);
+
+                // 颜色变体
+                const baseColor = new THREE.Color(cfg.color);
+                const hueShift = (Math.random()-0.5)*0.06 + (Math.random()-0.5)*0.04;
+                const satShift = (Math.random()-0.5)*0.15;
+                const litShift = (Math.random()-0.5)*0.1;
+                const hsl = {};
+                baseColor.getHSL(hsl);
+                const varColor = new THREE.Color().setHSL(
+                    U.clamp(hsl.h + hueShift, 0, 1),
+                    U.clamp(hsl.s + satShift, 0, 1),
+                    U.clamp(hsl.l + litShift, 0, 1)
+                );
+
+                vehicleInstances.push({
+                    vType, segIdx, progress, speed,
+                    targetSpeed: speed,
+                    colorHex: varColor.getHex(),
+                    instanceIdx: i
+                });
+
+                // 设置初始矩阵
+                dummy.position.set(wx, wy, wz);
+                dummy.rotation.set(0, angle, 0);
+                dummy.scale.set(1,1,1);
+                dummy.updateMatrix();
+                im.setMatrixAt(i, dummy.matrix);
+                im.setColorAt(i, varColor);
+
+                // 头灯位置(前端)
+                dummy.position.set(
+                    wx + seg.dirX * cfg.body[0]*0.5,
+                    wy + cfg.body[1]*0.55,
+                    wz + seg.dirZ * cfg.body[0]*0.5
+                );
+                dummy.updateMatrix();
+                hlIM.setMatrixAt(i, dummy.matrix);
+
+                // 尾灯位置(后端)
+                dummy.position.set(
+                    wx - seg.dirX * cfg.body[0]*0.5,
+                    wy + cfg.body[1]*0.55,
+                    wz - seg.dirZ * cfg.body[0]*0.5
+                );
+                dummy.updateMatrix();
+                tlIM.setMatrixAt(i, dummy.matrix);
+            }
+            im.instanceMatrix.needsUpdate = true;
+            im.instanceColor.needsUpdate = true;
+            hlIM.instanceMatrix.needsUpdate = true;
+            tlIM.instanceMatrix.needsUpdate = true;
+        }
+
+        console.log('[P9] Vehicles spawned: ' + vehicleInstances.length);
+        return vehicleInstances.length;
+    }
+
+    function updateVehicleTraffic(dt) {
+        if (vehicleInstances.length === 0) return;
+        const dummy = new THREE.Object3D();
+
+        // 全局车距检测：简单的分段碰撞避免
+        // 按 segment 分组车辆（按 progress 排序）
+        const segCars = {};
+        for (let i=0; i<vehicleInstances.length; i++) {
+            const v = vehicleInstances[i];
+            if (!segCars[v.segIdx]) segCars[v.segIdx] = [];
+            segCars[v.segIdx].push(i);
+        }
+        for (const key of Object.keys(segCars)) {
+            segCars[key].sort((a,b) => vehicleInstances[a].progress - vehicleInstances[b].progress);
+        }
+
+        for (let i=0; i<vehicleInstances.length; i++) {
+            const v = vehicleInstances[i];
+            const seg = vehicleSegments[v.segIdx];
+            if (!seg) continue;
+
+            // 前方车辆检测（同段内）
+            const sameSeg = segCars[v.segIdx] || [];
+            const myIdx = sameSeg.indexOf(i);
+            let frontCarDist = 999;
+            if (myIdx >= 0 && myIdx < sameSeg.length-1) {
+                const front = vehicleInstances[sameSeg[myIdx+1]];
+                frontCarDist = (front.progress - v.progress) * seg.len;
+            }
+
+            // 速度调节：前车<15m则减速，前车<6m则急刹
+            const safeDist = 12;
+            const minDist = 5;
+            if (frontCarDist < minDist) {
+                v.targetSpeed = 0.5;
+            } else if (frontCarDist < safeDist) {
+                v.targetSpeed = Math.max(0.5, v.speed * 0.7);
+            } else {
+                // 恢复目标速度（按车型）
+                v.targetSpeed = v.vType===2 ? (2.5+Math.sin(i*3.7)*0.8) : (3.5+Math.sin(i*2.1)*1.5);
+            }
+            v.speed = U.lerp(v.speed, v.targetSpeed, 2.0 * dt);
+            if (v.speed < 0.1) v.speed = 0.1;
+
+            // 沿路段推进
+            v.progress += v.speed * dt / seg.len;
+
+            // 到达路段末端→切换路段
+            if (v.progress >= 1.0) {
+                v.progress -= 1.0;
+                // 选择下一条路段
+                if (seg.nextIdx.length > 0) {
+                    // 70%概率直行（最小转向角），30%随机
+                    let best = seg.nextIdx[0];
+                    if (Math.random() < 0.3) {
+                        best = seg.nextIdx[Math.floor(Math.random()*seg.nextIdx.length)];
+                    } else {
+                        for (const n of seg.nextIdx) {
+                            if (n.turnAngle < best.turnAngle) best = n;
+                        }
+                    }
+                    v.segIdx = best.idx;
+                    const newSeg = vehicleSegments[best.idx];
+                    if (best.fromStart) v.progress = 0;
+                    else v.progress = 0; // 都从起点开始（简化）
+                } else {
+                    // 死胡同：调头或随机跳转
+                    v.segIdx = Math.floor(Math.random() * vehicleSegments.length);
+                    v.progress = 0.1;
+                }
+            }
+
+            // 计算新世界位置
+            const curSeg = vehicleSegments[v.segIdx];
+            if (!curSeg) { v.segIdx = 0; continue; }
+            const wx = curSeg.start.x + curSeg.dirX * curSeg.len * v.progress;
+            const wz = curSeg.start.z + curSeg.dirZ * curSeg.len * v.progress;
+            const wy = (getTerrainH(curSeg.start.x,curSeg.start.z)+getTerrainH(curSeg.end.x,curSeg.end.z))/2 + 0.3;
+            const angle = Math.atan2(curSeg.dirX, curSeg.dirZ);
+
+            // 更新车身矩阵
+            const im = vehicleBodyIM[v.vType];
+            const cfg = VEHICLE_TYPES[v.vType];
+            dummy.position.set(wx, wy, wz);
+            dummy.rotation.set(0, angle, 0);
+            dummy.scale.set(1,1,1);
+            dummy.updateMatrix();
+            im.setMatrixAt(v.instanceIdx, dummy.matrix);
+
+            // 更新头灯矩阵
+            const hlIM = vehicleHeadlightIM[v.vType];
+            dummy.position.set(
+                wx + curSeg.dirX * cfg.body[0]*0.5,
+                wy + cfg.body[1]*0.55,
+                wz + curSeg.dirZ * cfg.body[0]*0.5
+            );
+            dummy.updateMatrix();
+            hlIM.setMatrixAt(v.instanceIdx, dummy.matrix);
+
+            // 更新尾灯矩阵
+            const tlIM = vehicleTaillightIM[v.vType];
+            dummy.position.set(
+                wx - curSeg.dirX * cfg.body[0]*0.5,
+                wy + cfg.body[1]*0.55,
+                wz - curSeg.dirZ * cfg.body[0]*0.5
+            );
+            dummy.updateMatrix();
+            tlIM.setMatrixAt(v.instanceIdx, dummy.matrix);
+        }
+
+        // 刷新所有 InstancedMesh 矩阵
+        for (let vt=0; vt<3; vt++) {
+            if (vehicleBodyIM[vt]) {
+                vehicleBodyIM[vt].instanceMatrix.needsUpdate = true;
+                vehicleHeadlightIM[vt].instanceMatrix.needsUpdate = true;
+                vehicleTaillightIM[vt].instanceMatrix.needsUpdate = true;
+            }
+        }
+
+        // 日夜联动：头灯/尾灯 emissive 强度
+        const dayness = window._daynessCache || 0.85;
+        const nightFactor = 1.0 - U.clamp(dayness / 0.35, 0, 1);
+        for (let vt=0; vt<3; vt++) {
+            if (vehicleHeadlightMat[vt]) {
+                vehicleHeadlightMat[vt].emissiveIntensity = nightFactor * 2.5;
+            }
+            if (vehicleTaillightMat[vt]) {
+                vehicleTaillightMat[vt].emissiveIntensity = nightFactor * 1.8;
+            }
+        }
+    }
+
     // ---- 日夜循环 ----
     function updateDayNight(t) {
         const twoPI = Math.PI * 2;
@@ -1602,6 +1917,8 @@
         if (scene.environment && scene.environmentIntensity !== undefined) {
             scene.environmentIntensity = 0.15 + dayness * 0.85;
         }
+
+        window._daynessCache = dayness;
     }
 
     // 雾层设置 (P8: 雾色由 updateDayNight 动态控制)
@@ -1720,10 +2037,13 @@
         const bldCount = buildBuildings();
         console.log(`[P4] 建筑: ${bldCount} 个网格体`);
 
-        // ---- P5: 街道家具 + 雾层 ----
+        // ---- P5: 街道家具 + 雾层 + P9 载具 ----
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
         setupFog();
+        // P9: 载具交通
+        const vehCount = buildVehicleTraffic();
+        console.log(`[P9] 载具: ${vehCount} 辆`);
         // 初始日夜状态（正午附近）
         updateDayNight(dayProgress);
 
@@ -1846,6 +2166,7 @@
             dayProgress += dt / dayCycleTime * dayCycleSpeed;
             if (dayProgress >= 1.0) dayProgress -= 1.0;
             updateDayNight(dayProgress);
+            updateVehicleTraffic(dt); // P9: 载具交通更新
         }
         updateLOD(); // P7: LOD 切换
         updateCamera();
@@ -1863,7 +2184,7 @@
         const hours = Math.floor(dayProgress * 24);
         const mins = Math.floor((dayProgress * 24 - hours) * 60);
         const cycleLabel = dayCycleSpeed !== 1 ? ` x${dayCycleSpeed.toFixed(1)}` : '';
-        document.getElementById('info').textContent = `v7.0 | FPS: ${Math.round(1/dt)} | ${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}${cycleLabel}`;
+        document.getElementById('info').textContent = `v8.0 (P9) | FPS: ${Math.round(1/dt)} | ${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}${cycleLabel}`;
     }
 
     // ---- 启动 ----
@@ -1951,6 +2272,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
