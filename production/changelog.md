@@ -1,5 +1,26 @@
 # Changelog
 
+## P25D — Interior Mapping 方案B (窗户假3D房间)
+- ✅ **imRayBox() 射线-盒子相交函数** (GLSL)
+  - 5 面检测: 后墙 / 地板 / 天花板 / 左墙 / 右墙
+  - 返回 vec4(hitUV, faceId, hitFlag) — hitUV 用于采样房间图集
+  - 射线方向 = 视线方向在墙面空间的投影 (depth-normalized)
+- ✅ **generateRoomAtlas() Canvas 程序化房间纹理图集**
+  - 4×4 = 16 种房间风格 (living/office/bedroom/kitchen/bath/dining/empty)
+  - 每格 256×256 px, 总图 1024×1024
+  - 程序化绘制: 墙面渐变 + 地板/天花板条 + 家具剪影 + 电视/显示器辉光 + 噪声
+  - CanvasTexture + SRGBColorSpace, 无 mipmap (避免采样模糊)
+- ✅ **WL_EMISSIVE 重写: LOD 混合**
+  - 近景 (camDist < 25m): Interior Mapping 射线步进 → 采样房间图集
+  - 远景 (camDist > 55m): P25C UV Grid emissive (原方案保留)
+  - 过渡区 (25-55m): smoothstep 混合, 无 popping
+  - 每窗 GPU hash 决定房间风格索引 (16 种) + 房间深度随机
+  - faceShade: 后墙 1.0 / 地板 0.55 / 天花板 0.35 / 侧墙 0.75
+- ✅ **新增 uniforms**: wlCameraPos / wlRoomAtlas / wlAtlasCols / wlAtlasRows
+- ✅ **updateWindowLights 每帧同步相机位置** (Interior Mapping 依赖视角)
+- ✅ **src/systems/window_lights.js 同步更新** (模块化版本与 index_module.html 一致)
+- 📦 部署: https://github.com/zxc403/xingyuancheng
+
 ## v6.12 — 画质再升级：r166 兼容 + 4 档画质 + Film Pass + PBR 拉满（commit 6 of 6，M3 全套）
 - ✅ **M3.1 升级 r160 → r166 兼容层**
   - `OutputPass` 已在 r160 就位（之前 v6.10.6 已引），无需改 main path
