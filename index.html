@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v7.0 · 保留渲染管线 (2026-07-27)</title>
+    <title>星渊城 v8.0 · P10 行人系统 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -41,16 +41,17 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v7.0</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v8.0</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v7.0 · 渲染管线保留版本
-    // 保留：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
-    // 移除：场景生成、NPC、载具、战斗、任务
+    // 星渊城 v8.0 · P10 行人系统
+    // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
+    // P1-P5: 地形、路网、地块、建筑、家具/雾
+    // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
     // ============================================================
 
     import * as THREE from 'three';
@@ -108,11 +109,6 @@
     let scene, camera, renderer, clock;
     let ambient, sun, hemi;
     let composer, outputPass, ssaoPass;
-
-    // ---- 日夜循环状态 ----
-    let dayCycleTime = 300; // 秒/完整循环
-    let dayProgress = 0.42; // 起始接近正午
-    let dayCycleSpeed = 1.0; // 倍速
 
     // ---- 玩家 ----
     const player = {
@@ -486,11 +482,9 @@
         const fill = new THREE.DirectionalLight(0x6688c0, 0.55);
         fill.position.set(80, 60, 80);
         scene.add(fill);
-        window._fill = fill;
         const rim = new THREE.DirectionalLight(0xc9a96e, 0.35);
         rim.position.set(0, 20, -120);
         scene.add(rim);
-        window._rim = rim;
 
         // 后处理
         if (isMobile) {
@@ -636,20 +630,6 @@
     // ===== P2: 路网生成 (Parish & Müller 风格) =====
     // 全局道路段存储：{x1,z1,x2,z2,w} 每条为一段
     const roadSegments = [];
-
-    // ===== P9: 载具交通系统 =====
-    const vehicleSegments = [];   // {start:{x,z}, end:{x,z}, len, dirX, dirZ, nx, nz, w, nextIdx:[]}
-    const vehicleInstances = [];  // {vType, segIdx, progress, speed, targetSpeed, colorHex, instanceIdx}
-    const VEHICLE_TYPES = {
-        0: { name:'sedan', body:[1.6,0.35,0.85], cabin:[0.7,0.25,0.8], cabinOffY:0.06, color:'#8899bb', count:45 },
-        1: { name:'suv',   body:[1.9,0.42,1.0],  cabin:[0.85,0.30,0.95],cabinOffY:0.08, color:'#bbaa88', count:35 },
-        2: { name:'truck', body:[2.3,0.50,0.95], cabin:[0.5,0.45,0.9], cabinOffY:0.02, color:'#776655', count:20 }
-    };
-    let vehicleBodyIM = {};       // {0:InstancedMesh, 1:..., 2:...}
-    let vehicleHeadlightIM = {};  // headlight indicator IM per type
-    let vehicleTaillightIM = {};  // taillight indicator IM per type
-    let vehicleHeadlightMat = {}; // material ref for emissive control
-    let vehicleTaillightMat = {};
 
     // 四区关键节点（城市骨架点）
     const NODES = [
@@ -1009,17 +989,10 @@
     function rand(min,max) { return min+Math.random()*(max-min); }
     function randInt(min,max) { return Math.floor(rand(min,max+0.999)); }
 
-    // P7: 建筑记录（供 LOD 系统使用）
-    const buildingRecords = [];
-    window._buildingRecords = buildingRecords;
-    const buildingMats = []; // P8: 建筑立面材质追踪
-    window._buildingMats = buildingMats;
-
     function buildBuildings() {
         const bldGroup = new THREE.Group();
         bldGroup.name = 'buildings';
         const seed = 42;
-        buildingRecords.length = 0;
 
         // 简易伪随机（确定性，避免每次刷新不同）
         let s = seed;
@@ -1040,9 +1013,6 @@
             const cx = plot.cx + rnd(-0.3,0.3)*(plot.w-bw);
             const cz = plot.cz + rnd(-0.3,0.3)*(plot.d-bd);
             const baseY = getTerrainH(cx, cz);
-
-            // P7: 记录建筑数据供 LOD 系统使用
-            buildingRecords.push({cx, cz, totalH, bw, bd, baseY, dist});
 
             // 建筑分段（底座+主体+顶冠）
             const segments = [];
@@ -1082,26 +1052,12 @@
                     repTex.repeat.set(repW, repH);
                     matOpts.map = repTex;
                 }
-                // P8: 夜景 emissive 贴图
-                const nTex = facadeNightTextures[dist];
-                if (nTex) {
-                    const repH2 = Math.max(1, Math.floor(seg.h / 4));
-                    const repW2 = Math.max(1, Math.floor(Math.max(seg.w, seg.d) / 3));
-                    const nRepTex = nTex.clone();
-                    nRepTex.needsUpdate = true;
-                    nRepTex.repeat.set(repW2, repH2);
-                    matOpts.emissiveMap = nRepTex;
-                    matOpts.emissive = new THREE.Color(0xffaa44);
-                    matOpts.emissiveIntensity = 0.0;
-                }
                 const mat = new THREE.MeshStandardMaterial(matOpts);
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.set(cx, accumY + seg.h/2, cz);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
-                mesh.userData.isBuilding = true;
                 bldGroup.add(mesh);
-                buildingMats.push(mat);
                 accumY += seg.h;
             }
 
@@ -1143,99 +1099,6 @@
         scene.add(bldGroup);
         window._bldGroup = bldGroup;
         return bldGroup.children.length;
-    }
-
-    // ===== P7: LOD 系统 + InstancedMesh 批量渲染 =====
-    function buildLODLevels() {
-        const refGeo = new THREE.BoxGeometry(1, 1, 1);
-        const lod1ColorMap = {A:0x667788, B:0xbbaa88, C:0x554433, D:0x887766};
-        window._lod1Meshes = {};
-        window._lod2Points = null;
-
-        // ---- LOD 1: InstancedMesh 简化单体 (200m~700m) ----
-        const lod1ByDist = {A:[], B:[], C:[], D:[]};
-        for (const rec of buildingRecords) {
-            lod1ByDist[rec.dist].push(rec);
-        }
-
-        for (const [dist, recs] of Object.entries(lod1ByDist)) {
-            if (recs.length === 0) continue;
-            const mat = new THREE.MeshStandardMaterial({
-                color: lod1ColorMap[dist], roughness: 0.75, metalness: 0.15,
-                flatShading: false
-            });
-            const im = new THREE.InstancedMesh(refGeo, mat, recs.length);
-            im.name = 'lod1_' + dist;
-            im.castShadow = true;
-            im.receiveShadow = true;
-            im.frustumCulled = false;
-            im.visible = false; // LOD 0 默认可见
-
-            const dummy = new THREE.Object3D();
-            recs.forEach((rec, i) => {
-                dummy.position.set(rec.cx, rec.baseY + rec.totalH * 0.5, rec.cz);
-                dummy.scale.set(rec.bw, rec.totalH, rec.bd);
-                dummy.updateMatrix();
-                im.setMatrixAt(i, dummy.matrix);
-            });
-            im.instanceMatrix.needsUpdate = true;
-            scene.add(im);
-            window._lod1Meshes[dist] = im;
-        }
-
-        // ---- LOD 2: Points 远距离光点 (>700m) ----
-        const allCenters = buildingRecords.map(r => [
-            r.cx, r.baseY + r.totalH + 0.5, r.cz
-        ]).flat();
-        const ptsGeo = new THREE.BufferGeometry();
-        ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(allCenters, 3));
-        const ptsMat = new THREE.PointsMaterial({
-            color: 0xffddaa, size: 1.8,
-            transparent: true, opacity: 0.75,
-            depthWrite: false, blending: THREE.AdditiveBlending
-        });
-        const pts = new THREE.Points(ptsGeo, ptsMat);
-        pts.name = 'lod2';
-        pts.visible = false;
-        pts.frustumCulled = false;
-        scene.add(pts);
-        window._lod2Points = pts;
-
-        window._lodLevel = 0; // 当前激活的 LOD 级别
-        console.log('P7 LOD built: ' + getLODStats());
-    }
-
-    function updateLOD() {
-        const camPos = camera.position;
-        const lod0Group = window._bldGroup;
-        const lod1Meshes = window._lod1Meshes || {};
-        const lod2Pts = window._lod2Points;
-        if (!lod0Group) return;
-
-        // 计算相机到城市中心的距离
-        const distToCenter = Math.sqrt(camPos.x*camPos.x + camPos.z*camPos.z);
-        const LOD0_MAX = 250, LOD1_MAX = 700;
-
-        let newLevel;
-        if (distToCenter < LOD0_MAX)        newLevel = 0;
-        else if (distToCenter < LOD1_MAX)   newLevel = 1;
-        else                                newLevel = 2;
-
-        // 防抖：切换后至少保持 0.5 秒
-        if (newLevel !== window._lodLevel) {
-            window._lodLevel = newLevel;
-            lod0Group.visible = (newLevel === 0);
-            for (const im of Object.values(lod1Meshes)) im.visible = (newLevel === 1);
-            if (lod2Pts) lod2Pts.visible = (newLevel === 2);
-        }
-    }
-
-    function getLODStats() {
-        const lod0 = window._bldGroup ? window._bldGroup.children.length : 0;
-        let lod1 = 0;
-        for (const im of Object.values(window._lod1Meshes || {})) lod1 += im.count;
-        const lod2 = window._lod2Points ? window._lod2Points.geometry.attributes.position.count : 0;
-        return 'LOD0:' + lod0 + ' meshes | LOD1:' + lod1 + ' instanced | LOD2:' + lod2 + ' pts';
     }
 
     // ===== P5: 立面纹理 + 街道家具 + 雾层 =====
@@ -1335,81 +1198,10 @@
         return tex;
     }
 
-    // P8: 夜景窗格纹理（亮窗版本）
-    const facadeNightTextures = {};
-    function generateNightFacadeTexture(district) {
-        const size = 256;
-        const cv = document.createElement('canvas');
-        cv.width = size; cv.height = size;
-        const ctx = cv.getContext('2d');
-
-        let bgColor, litColor, winDensity, winShape, unlitColor;
-        switch(district) {
-        case 'A':
-            bgColor='#1a2230'; litColor='#ffdd88'; winDensity=0.55; winShape='tall'; unlitColor='#334466';
-            break;
-        case 'B':
-            bgColor='#3a3028'; litColor='#ffe8a0'; winDensity=0.40; winShape='square'; unlitColor='#887766';
-            break;
-        case 'C':
-            bgColor='#1a1510'; litColor='#ccaa66'; winDensity=0.25; winShape='wide'; unlitColor='#554433';
-            break;
-        case 'D':
-        default:
-            bgColor='#2a2218'; litColor='#ffdd88'; winDensity=0.35; winShape='square'; unlitColor='#776655';
-            break;
-        }
-
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(0, 0, size, size);
-
-        const gap = 4;
-        const floorH = Math.floor(size / 12);
-        const colW = Math.floor(size / 8);
-        for (let row=0; row<12; row++) {
-            for (let col=0; col<8; col++) {
-                if (Math.random() > winDensity) continue;
-                const wx = col*colW + gap, wy = row*floorH + gap;
-                let ww, wh;
-                if (winShape==='tall')   { ww=colW*0.55; wh=floorH*0.75; }
-                else if (winShape==='wide') { ww=colW*0.75; wh=floorH*0.45; }
-                else { ww=colW*0.50; wh=floorH*0.55; }
-
-                ctx.fillStyle = '#0a0a0a';
-                ctx.fillRect(wx-1, wy-1, ww+2, wh+2);
-                const lit = Math.random() < 0.45;
-                ctx.fillStyle = lit ? litColor : unlitColor;
-                ctx.fillRect(wx, wy, ww, wh);
-                ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-                ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.moveTo(wx+ww/2, wy); ctx.lineTo(wx+ww/2, wy+wh); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(wx, wy+wh/2); ctx.lineTo(wx+ww, wy+wh/2); ctx.stroke();
-            }
-        }
-
-        // 空调外机/百叶窗随机排布
-        ctx.fillStyle = '#333333';
-        for (let i=0; i<6; i++) {
-            const rx = 10 + Math.random()*220, ry = 10 + Math.random()*220;
-            ctx.fillRect(rx, ry, 26, 14);
-        }
-
-        const tex = new THREE.CanvasTexture(cv);
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.magFilter = THREE.LinearFilter;
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.generateMipmaps = true;
-        return tex;
-    }
-
     // 街道家具放置
     function buildStreetFurniture() {
         const furnGroup = new THREE.Group();
         furnGroup.name = 'streetFurniture';
-        window._streetLights = [];
-        window._lampMats = [];
 
         // 路灯几何复用
         const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, 6, 8);
@@ -1417,7 +1209,6 @@
         const lampGeo = new THREE.SphereGeometry(0.35, 8, 6);
         const poleMat = new THREE.MeshStandardMaterial({color:0x333333, roughness:0.4, metalness:0.8});
         const lampMat = new THREE.MeshStandardMaterial({color:0xffeedd, roughness:0.3, metalness:0.2, emissive:0x332211, emissiveIntensity:0.5});
-        window._lampMats.push(lampMat);
 
         // 树几何复用
         const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 3, 6);
@@ -1465,7 +1256,6 @@
                         const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
                         pt.position.copy(lamp.position);
                         furnGroup.add(pt);
-                        window._streetLights.push(pt);
                     }
                 }
             }
@@ -1506,422 +1296,251 @@
         return furnGroup.children.length;
     }
 
-    // ===== P9: 载具交通系统 =====
-    function buildVehicleGraph() {
-        vehicleSegments.length = 0;
-        // 只取主干道(w>=7)作为行驶道路
+    // ===== P10: 行人系统 =====
+    const pedestrianStates = [];    // {segIdx, t, speed, state, idleTimer, colorIdx, phase}
+    let pedestrianMesh = null;
+    const PED_COUNT = 200;
+    const PED_SPEED = 1.2;          // m/s
+    const PED_IDLE_MIN = 2.0;       // 最短站立时间
+    const PED_IDLE_MAX = 8.0;       // 最长站立时间
+
+    // 从 roadSegments 提取 sidewalk 路径
+    // 每条道路段两侧各一条 sidewalk，偏移 w/2 + 2m
+    function buildPedestrianNetwork() {
+        const paths = []; // [{x1,z1,x2,z2, nx,nz, sideOffset}]
+        const junctionMap = new Map(); // 端点 key -> [pathIdx, t]
+
         for (const s of roadSegments) {
-            if (s.w < 7) continue;
             const dx = s.x2 - s.x1, dz = s.z2 - s.z1;
-            const len = Math.sqrt(dx*dx + dz*dz);
+            const len = Math.sqrt(dx * dx + dz * dz);
             if (len < 6) continue;
-            vehicleSegments.push({
-                start: {x:s.x1, z:s.z1},
-                end:   {x:s.x2, z:s.z2},
-                len, dirX: dx/len, dirZ: dz/len,
-                nx: -dz/len, nz: dx/len, w: s.w,
-                nextIdx: []
+            const nx = -dz / len, nz = dx / len;
+            const offset = s.w * 0.5 + 2.0; // sidewalk 距路中线
+
+            for (const side of [-1, 1]) {
+                const so = offset * side;
+                const p = {
+                    x1: s.x1 + nx * so,
+                    z1: s.z1 + nz * so,
+                    x2: s.x2 + nx * so,
+                    z2: s.z2 + nz * so,
+                    len: len,
+                    roadW: s.w
+                };
+                const idx = paths.length;
+                paths.push(p);
+
+                // 记录端点，用于路口连接
+                const key1 = `${p.x1.toFixed(1)},${p.z1.toFixed(1)}`;
+                const key2 = `${p.x2.toFixed(1)},${p.z2.toFixed(1)}`;
+                if (!junctionMap.has(key1)) junctionMap.set(key1, []);
+                if (!junctionMap.has(key2)) junctionMap.set(key2, []);
+                junctionMap.get(key1).push({ pathIdx: idx, t: 0 });
+                junctionMap.get(key2).push({ pathIdx: idx, t: 1 });
+            }
+        }
+
+        return { paths, junctionMap };
+    }
+
+    let pedPaths = [];
+    let pedJunctionMap = new Map();
+
+    function spawnPedestrians() {
+        const { paths, junctionMap } = buildPedestrianNetwork();
+        pedPaths = paths;
+        pedJunctionMap = junctionMap;
+
+        if (paths.length === 0) {
+            console.warn('[P10] 无 sidewalk 路径，跳过行人');
+            return;
+        }
+
+        // 构建人体几何体: 身体(圆柱) + 头部(球)
+        const bodyGeo = new THREE.CylinderGeometry(0.15, 0.18, 1.0, 8, 4);
+        bodyGeo.translate(0, 0.5, 0);
+        const headGeo = new THREE.SphereGeometry(0.14, 8, 6);
+        headGeo.translate(0, 1.08, 0);
+        const mergedGeo = new THREE.BufferGeometry();
+        const bodyPos = bodyGeo.attributes.position;
+        const headPos = headGeo.attributes.position;
+        const totalVerts = bodyPos.count + headPos.count;
+        const posArr = new Float32Array(totalVerts * 3);
+        const normArr = new Float32Array(totalVerts * 3);
+
+        for (let i = 0; i < bodyPos.count; i++) {
+            posArr[i * 3] = bodyPos.getX(i);
+            posArr[i * 3 + 1] = bodyPos.getY(i);
+            posArr[i * 3 + 2] = bodyPos.getZ(i);
+        }
+        for (let i = 0; i < headPos.count; i++) {
+            const j = bodyPos.count + i;
+            posArr[j * 3] = headPos.getX(i);
+            posArr[j * 3 + 1] = headPos.getY(i);
+            posArr[j * 3 + 2] = headPos.getZ(i);
+        }
+        mergedGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        mergedGeo.computeVertexNormals();
+
+        const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+        pedestrianMesh = new THREE.InstancedMesh(mergedGeo, mat, PED_COUNT);
+        pedestrianMesh.castShadow = true;
+        pedestrianMesh.receiveShadow = true;
+        pedestrianMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+        const dummy = new THREE.Object3D();
+        const colors = [
+            0xcc4444, 0x44cc44, 0x4444cc, 0xcccc44,
+            0xcc44cc, 0x44cccc, 0x888888, 0xcc8844,
+            0x88cc44, 0x4488cc, 0xaa6644, 0x6644aa,
+            0x334455, 0x553322, 0x225533, 0x884444,
+        ];
+
+        for (let i = 0; i < PED_COUNT; i++) {
+            // 随机选一条 sidewalk，随机位置
+            const pathIdx = Math.floor(Math.random() * paths.length);
+            const p = paths[pathIdx];
+            const t = Math.random();
+            const x = p.x1 + (p.x2 - p.x1) * t;
+            const z = p.z1 + (p.z2 - p.z1) * t;
+            const h = getTerrainH(x, z);
+
+            dummy.position.set(x, h, z);
+            dummy.rotation.y = Math.atan2(p.x2 - p.x1, p.z2 - p.z1) + (Math.random() > 0.5 ? 0 : Math.PI);
+            dummy.updateMatrix();
+            pedestrianMesh.setMatrixAt(i, dummy.matrix);
+
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            pedestrianMesh.setColorAt(i, new THREE.Color(color));
+
+            // 初始状态: 50% idle, 50% walking
+            const initialIdle = Math.random() < 0.5;
+            pedestrianStates.push({
+                pathIdx,
+                t,
+                speed: PED_SPEED * (0.7 + Math.random() * 0.6),
+                state: initialIdle ? 'idle' : 'walk',
+                idleTimer: initialIdle ? Math.random() * PED_IDLE_MAX : 0,
+                colorIdx: Math.floor(Math.random() * colors.length),
+                phase: Math.random() * Math.PI * 2, // 用于 bob 动画
+                forward: true, // true: 从 x1->x2, false: 从 x2->x1
             });
         }
-        // 建立相邻关系：共享端点且方向不反向
-        const TOL = 3;
-        for (let i=0; i<vehicleSegments.length; i++) {
-            const a = vehicleSegments[i];
-            for (let j=0; j<vehicleSegments.length; j++) {
-                if (i===j) continue;
-                const b = vehicleSegments[j];
-                const dEE = Math.hypot(a.end.x-b.end.x, a.end.z-b.end.z);
-                const dES = Math.hypot(a.end.x-b.start.x, a.end.z-b.start.z);
-                if (dES < TOL) {
-                    const dot = a.dirX*b.dirX + a.dirZ*b.dirZ;
-                    if (dot > -0.5) a.nextIdx.push({idx:j, fromStart:true, turnAngle:Math.acos(U.clamp(dot,-1,1))});
+
+        pedestrianMesh.instanceColor.needsUpdate = true;
+        scene.add(pedestrianMesh);
+        window._pedestrianMesh = pedestrianMesh;
+
+        console.log(`[P10] 行人系统: ${PED_COUNT} 人, ${paths.length} 条 sidewalk`);
+    }
+
+    function findNextSegment(pathIdx, t, forward) {
+        // 当前到达端点，在 junctionMap 中查找相邻 sidewalk
+        const p = pedPaths[pathIdx];
+        const keyX = forward ? p.x2 : p.x1;
+        const keyZ = forward ? p.z2 : p.z1;
+        const key = `${keyX.toFixed(1)},${keyZ.toFixed(1)}`;
+        const candidates = pedJunctionMap.get(key);
+        if (!candidates || candidates.length <= 1) {
+            // 无分叉或只有自己：掉头或返回
+            if (Math.random() < 0.4) return { pathIdx, t: forward ? 1.0 : 0.0, forward: !forward };
+            // 随机选一条（如果有其他路径）
+            const others = candidates ? candidates.filter(c => c.pathIdx !== pathIdx) : [];
+            if (others.length > 0) {
+                const pick = others[Math.floor(Math.random() * others.length)];
+                return { pathIdx: pick.pathIdx, t: pick.t, forward: pick.t === 0 };
+            }
+            return { pathIdx, t: forward ? 1.0 : 0.0, forward: !forward };
+        }
+
+        const others = candidates.filter(c => c.pathIdx !== pathIdx);
+        if (others.length === 0) {
+            return { pathIdx, t: forward ? 1.0 : 0.0, forward: !forward };
+        }
+        const pick = others[Math.floor(Math.random() * others.length)];
+        return { pathIdx: pick.pathIdx, t: pick.t, forward: pick.t === 0 };
+    }
+
+    function updatePedestrians(dt) {
+        if (!pedestrianMesh || pedPaths.length === 0) return;
+
+        const dummy = new THREE.Object3D();
+
+        for (let i = 0; i < PED_COUNT; i++) {
+            const st = pedestrianStates[i];
+            const p = pedPaths[st.pathIdx];
+            if (!p) continue;
+
+            if (st.state === 'idle') {
+                st.idleTimer -= dt;
+                if (st.idleTimer <= 0) {
+                    // 转到 walk，决定方向
+                    if (st.t <= 0.01) st.forward = true;
+                    else if (st.t >= 0.99) st.forward = false;
+                    st.state = 'walk';
                 }
-            }
-        }
-        console.log('[P9] Vehicle graph: ' + vehicleSegments.length + ' segments');
-    }
-
-    function buildVehicleTraffic() {
-        buildVehicleGraph();
-        if (vehicleSegments.length === 0) return 0;
-
-        // 为每种车型创建 InstancedMesh
-        for (let vType=0; vType<3; vType++) {
-            const cfg = VEHICLE_TYPES[vType];
-            const n = cfg.count;
-
-            // ---- 车身几何（简化为单体 Box，总高=车身+车顶） ----
-            const totalH = cfg.body[1] + cfg.cabin[1] + cfg.cabinOffY + 0.05;
-            const bodyGeo = new THREE.BoxGeometry(cfg.body[0], totalH, cfg.body[2]);
-            bodyGeo.translate(0, totalH/2, 0);
-
-            const bodyMat = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(cfg.color), roughness: 0.35, metalness: 0.4,
-                envMapIntensity: 0.8
-            });
-            const im = new THREE.InstancedMesh(bodyGeo, bodyMat, n);
-            im.name = 'vehicleBody_' + cfg.name;
-            im.castShadow = true;
-            im.receiveShadow = true;
-            im.frustumCulled = false;
-            scene.add(im);
-            vehicleBodyIM[vType] = im;
-
-            // ---- 头灯几何（前端小发光块） ----
-            const hlGeo = new THREE.BoxGeometry(0.12, 0.08, cfg.body[2]*0.55);
-            const hlMat = new THREE.MeshStandardMaterial({
-                color: 0xffffcc, roughness: 0.1, metalness: 0.1,
-                emissive: 0xffdd88, emissiveIntensity: 0.0
-            });
-            vehicleHeadlightMat[vType] = hlMat;
-            const hlIM = new THREE.InstancedMesh(hlGeo, hlMat, n);
-            hlIM.name = 'vehicleHL_' + cfg.name;
-            hlIM.frustumCulled = false;
-            scene.add(hlIM);
-            vehicleHeadlightIM[vType] = hlIM;
-
-            // ---- 尾灯几何（后端小红块） ----
-            const tlGeo = new THREE.BoxGeometry(0.12, 0.06, cfg.body[2]*0.5);
-            const tlMat = new THREE.MeshStandardMaterial({
-                color: 0xff2222, roughness: 0.1, metalness: 0.1,
-                emissive: 0xff0000, emissiveIntensity: 0.0
-            });
-            vehicleTaillightMat[vType] = tlMat;
-            const tlIM = new THREE.InstancedMesh(tlGeo, tlMat, n);
-            tlIM.name = 'vehicleTL_' + cfg.name;
-            tlIM.frustumCulled = false;
-            scene.add(tlIM);
-            vehicleTaillightIM[vType] = tlIM;
-        }
-
-        // 在主干道上生成车辆实例
-        vehicleInstances.length = 0;
-        const dummy = new THREE.Object3D();
-        let totalInst = 0;
-        let globalIdx = 0;
-
-        for (let vType=0; vType<3; vType++) {
-            const cfg = VEHICLE_TYPES[vType];
-            const im = vehicleBodyIM[vType];
-            const hlIM = vehicleHeadlightIM[vType];
-            const tlIM = vehicleTaillightIM[vType];
-
-            for (let i=0; i<cfg.count; i++) {
-                // 随机选一条主干道段
-                const segIdx = Math.floor(Math.random() * vehicleSegments.length);
-                const seg = vehicleSegments[segIdx];
-                const progress = 0.1 + Math.random() * 0.8;
-                const speed = 2 + Math.random() * (vType===2?3:5); // 卡车慢
-
-                // 世界坐标
-                const wx = seg.start.x + seg.dirX * seg.len * progress;
-                const wz = seg.start.z + seg.dirZ * seg.len * progress;
-                const wy = (getTerrainH(seg.start.x,seg.start.z)+getTerrainH(seg.end.x,seg.end.z))/2 + 0.3;
-                const angle = Math.atan2(seg.dirX, seg.dirZ);
-
-                // 颜色变体
-                const baseColor = new THREE.Color(cfg.color);
-                const hueShift = (Math.random()-0.5)*0.06 + (Math.random()-0.5)*0.04;
-                const satShift = (Math.random()-0.5)*0.15;
-                const litShift = (Math.random()-0.5)*0.1;
-                const hsl = {};
-                baseColor.getHSL(hsl);
-                const varColor = new THREE.Color().setHSL(
-                    U.clamp(hsl.h + hueShift, 0, 1),
-                    U.clamp(hsl.s + satShift, 0, 1),
-                    U.clamp(hsl.l + litShift, 0, 1)
-                );
-
-                vehicleInstances.push({
-                    vType, segIdx, progress, speed,
-                    targetSpeed: speed,
-                    colorHex: varColor.getHex(),
-                    instanceIdx: i
-                });
-
-                // 设置初始矩阵
-                dummy.position.set(wx, wy, wz);
-                dummy.rotation.set(0, angle, 0);
-                dummy.scale.set(1,1,1);
-                dummy.updateMatrix();
-                im.setMatrixAt(i, dummy.matrix);
-                im.setColorAt(i, varColor);
-
-                // 头灯位置(前端)
-                dummy.position.set(
-                    wx + seg.dirX * cfg.body[0]*0.5,
-                    wy + cfg.body[1]*0.55,
-                    wz + seg.dirZ * cfg.body[0]*0.5
-                );
-                dummy.updateMatrix();
-                hlIM.setMatrixAt(i, dummy.matrix);
-
-                // 尾灯位置(后端)
-                dummy.position.set(
-                    wx - seg.dirX * cfg.body[0]*0.5,
-                    wy + cfg.body[1]*0.55,
-                    wz - seg.dirZ * cfg.body[0]*0.5
-                );
-                dummy.updateMatrix();
-                tlIM.setMatrixAt(i, dummy.matrix);
-            }
-            im.instanceMatrix.needsUpdate = true;
-            im.instanceColor.needsUpdate = true;
-            hlIM.instanceMatrix.needsUpdate = true;
-            tlIM.instanceMatrix.needsUpdate = true;
-        }
-
-        console.log('[P9] Vehicles spawned: ' + vehicleInstances.length);
-        return vehicleInstances.length;
-    }
-
-    function updateVehicleTraffic(dt) {
-        if (vehicleInstances.length === 0) return;
-        const dummy = new THREE.Object3D();
-
-        // 全局车距检测：简单的分段碰撞避免
-        // 按 segment 分组车辆（按 progress 排序）
-        const segCars = {};
-        for (let i=0; i<vehicleInstances.length; i++) {
-            const v = vehicleInstances[i];
-            if (!segCars[v.segIdx]) segCars[v.segIdx] = [];
-            segCars[v.segIdx].push(i);
-        }
-        for (const key of Object.keys(segCars)) {
-            segCars[key].sort((a,b) => vehicleInstances[a].progress - vehicleInstances[b].progress);
-        }
-
-        for (let i=0; i<vehicleInstances.length; i++) {
-            const v = vehicleInstances[i];
-            const seg = vehicleSegments[v.segIdx];
-            if (!seg) continue;
-
-            // 前方车辆检测（同段内）
-            const sameSeg = segCars[v.segIdx] || [];
-            const myIdx = sameSeg.indexOf(i);
-            let frontCarDist = 999;
-            if (myIdx >= 0 && myIdx < sameSeg.length-1) {
-                const front = vehicleInstances[sameSeg[myIdx+1]];
-                frontCarDist = (front.progress - v.progress) * seg.len;
+                st.phase += dt * 1.5; // idle 时轻微呼吸
             }
 
-            // 速度调节：前车<15m则减速，前车<6m则急刹
-            const safeDist = 12;
-            const minDist = 5;
-            if (frontCarDist < minDist) {
-                v.targetSpeed = 0.5;
-            } else if (frontCarDist < safeDist) {
-                v.targetSpeed = Math.max(0.5, v.speed * 0.7);
-            } else {
-                // 恢复目标速度（按车型）
-                v.targetSpeed = v.vType===2 ? (2.5+Math.sin(i*3.7)*0.8) : (3.5+Math.sin(i*2.1)*1.5);
-            }
-            v.speed = U.lerp(v.speed, v.targetSpeed, 2.0 * dt);
-            if (v.speed < 0.1) v.speed = 0.1;
-
-            // 沿路段推进
-            v.progress += v.speed * dt / seg.len;
-
-            // 到达路段末端→切换路段
-            if (v.progress >= 1.0) {
-                v.progress -= 1.0;
-                // 选择下一条路段
-                if (seg.nextIdx.length > 0) {
-                    // 70%概率直行（最小转向角），30%随机
-                    let best = seg.nextIdx[0];
-                    if (Math.random() < 0.3) {
-                        best = seg.nextIdx[Math.floor(Math.random()*seg.nextIdx.length)];
-                    } else {
-                        for (const n of seg.nextIdx) {
-                            if (n.turnAngle < best.turnAngle) best = n;
+            if (st.state === 'walk') {
+                // 沿 sidewalk 移动
+                const dp = st.speed * dt / p.len;
+                if (st.forward) {
+                    st.t += dp;
+                    if (st.t >= 1.0) {
+                        st.t = 1.0;
+                        // 到达端点，选择下一段
+                        const next = findNextSegment(st.pathIdx, st.t, st.forward);
+                        st.pathIdx = next.pathIdx;
+                        st.t = next.t;
+                        st.forward = next.forward;
+                        // 偶尔 idle
+                        if (Math.random() < 0.3) {
+                            st.state = 'idle';
+                            st.idleTimer = PED_IDLE_MIN + Math.random() * (PED_IDLE_MAX - PED_IDLE_MIN);
                         }
                     }
-                    v.segIdx = best.idx;
-                    const newSeg = vehicleSegments[best.idx];
-                    if (best.fromStart) v.progress = 0;
-                    else v.progress = 0; // 都从起点开始（简化）
                 } else {
-                    // 死胡同：调头或随机跳转
-                    v.segIdx = Math.floor(Math.random() * vehicleSegments.length);
-                    v.progress = 0.1;
+                    st.t -= dp;
+                    if (st.t <= 0.0) {
+                        st.t = 0.0;
+                        const next = findNextSegment(st.pathIdx, st.t, st.forward);
+                        st.pathIdx = next.pathIdx;
+                        st.t = next.t;
+                        st.forward = next.forward;
+                        if (Math.random() < 0.3) {
+                            st.state = 'idle';
+                            st.idleTimer = PED_IDLE_MIN + Math.random() * (PED_IDLE_MAX - PED_IDLE_MIN);
+                        }
+                    }
                 }
+                st.phase += st.speed * dt * 8;
             }
 
-            // 计算新世界位置
-            const curSeg = vehicleSegments[v.segIdx];
-            if (!curSeg) { v.segIdx = 0; continue; }
-            const wx = curSeg.start.x + curSeg.dirX * curSeg.len * v.progress;
-            const wz = curSeg.start.z + curSeg.dirZ * curSeg.len * v.progress;
-            const wy = (getTerrainH(curSeg.start.x,curSeg.start.z)+getTerrainH(curSeg.end.x,curSeg.end.z))/2 + 0.3;
-            const angle = Math.atan2(curSeg.dirX, curSeg.dirZ);
+            // 计算世界位置
+            const cp = pedPaths[st.pathIdx];
+            if (!cp) continue;
+            const px = cp.x1 + (cp.x2 - cp.x1) * st.t;
+            const pz = cp.z1 + (cp.z2 - cp.z1) * st.t;
+            const ph = getTerrainH(px, pz);
 
-            // 更新车身矩阵
-            const im = vehicleBodyIM[v.vType];
-            const cfg = VEHICLE_TYPES[v.vType];
-            dummy.position.set(wx, wy, wz);
+            // 朝向：行走时面朝前进方向，idle时保持
+            const dx = cp.x2 - cp.x1, dz = cp.z2 - cp.z1;
+            const angle = Math.atan2(st.forward ? dx : -dx, st.forward ? dz : -dz);
+
+            // 行走时 bob 动画
+            const bob = (st.state === 'walk') ? Math.sin(st.phase) * 0.04 : Math.sin(st.phase * 0.5) * 0.01;
+
+            dummy.position.set(px, ph + bob, pz);
             dummy.rotation.set(0, angle, 0);
-            dummy.scale.set(1,1,1);
             dummy.updateMatrix();
-            im.setMatrixAt(v.instanceIdx, dummy.matrix);
-
-            // 更新头灯矩阵
-            const hlIM = vehicleHeadlightIM[v.vType];
-            dummy.position.set(
-                wx + curSeg.dirX * cfg.body[0]*0.5,
-                wy + cfg.body[1]*0.55,
-                wz + curSeg.dirZ * cfg.body[0]*0.5
-            );
-            dummy.updateMatrix();
-            hlIM.setMatrixAt(v.instanceIdx, dummy.matrix);
-
-            // 更新尾灯矩阵
-            const tlIM = vehicleTaillightIM[v.vType];
-            dummy.position.set(
-                wx - curSeg.dirX * cfg.body[0]*0.5,
-                wy + cfg.body[1]*0.55,
-                wz - curSeg.dirZ * cfg.body[0]*0.5
-            );
-            dummy.updateMatrix();
-            tlIM.setMatrixAt(v.instanceIdx, dummy.matrix);
+            pedestrianMesh.setMatrixAt(i, dummy.matrix);
         }
 
-        // 刷新所有 InstancedMesh 矩阵
-        for (let vt=0; vt<3; vt++) {
-            if (vehicleBodyIM[vt]) {
-                vehicleBodyIM[vt].instanceMatrix.needsUpdate = true;
-                vehicleHeadlightIM[vt].instanceMatrix.needsUpdate = true;
-                vehicleTaillightIM[vt].instanceMatrix.needsUpdate = true;
-            }
-        }
-
-        // 日夜联动：头灯/尾灯 emissive 强度
-        const dayness = window._daynessCache || 0.85;
-        const nightFactor = 1.0 - U.clamp(dayness / 0.35, 0, 1);
-        for (let vt=0; vt<3; vt++) {
-            if (vehicleHeadlightMat[vt]) {
-                vehicleHeadlightMat[vt].emissiveIntensity = nightFactor * 2.5;
-            }
-            if (vehicleTaillightMat[vt]) {
-                vehicleTaillightMat[vt].emissiveIntensity = nightFactor * 1.8;
-            }
-        }
+        pedestrianMesh.instanceMatrix.needsUpdate = true;
     }
 
-    // ---- 日夜循环 ----
-    function updateDayNight(t) {
-        const twoPI = Math.PI * 2;
-        const sunPhase = t * twoPI;
-        const sunElev = Math.sin(sunPhase);
-        const sunAzimuth = sunPhase;
-
-        // 太阳位置（球坐标 → 笛卡尔）
-        const sunDist = 200;
-        const cosElev = Math.cos(Math.asin(sunElev));
-        const sunX = cosElev * Math.sin(sunAzimuth) * sunDist;
-        const sunY = sunElev * sunDist;
-        const sunZ = cosElev * Math.cos(sunAzimuth) * sunDist;
-
-        // dayness: 1=正午, 0=深夜
-        const rawDay = sunElev * 1.25 + 0.38;
-        const dayness = U.clamp(rawDay, 0.0, 1.0);
-
-        // 太阳颜色: 正午偏白, 近地平线偏暖
-        const sunHue = 0.12;
-        const sunSat = 0.4 + dayness * 0.5;
-        const sunLit = 0.5 + dayness * 0.5;
-        const sunC = `hsl(${sunHue*360}, ${(sunSat*100).toFixed(0)}%, ${(sunLit*100).toFixed(0)}%)`;
-
-        // ---- 天空穹顶 ----
-        if (window._skyDome) {
-            const u = window._skyDome.material.uniforms;
-            u.uDayness.value = dayness;
-            u.uSunDirection.value.set(sunX, sunY, sunZ).normalize();
-            u.uSunColor.value.setStyle(sunC);
-            u.uZenithColor.value.set(
-                0.04 + 0.16 * dayness,
-                0.08 + 0.42 * dayness,
-                0.25 + 0.65 * dayness
-            );
-            u.uHorizonColor.value.set(
-                0.08 + 0.72 * dayness,
-                0.12 + 0.73 * dayness,
-                0.18 + 0.72 * dayness
-            );
-        }
-
-        // ---- 主太阳光 ----
-        if (sun) {
-            sun.position.set(sunX, sunY, sunZ);
-            sun.intensity = 0.1 + dayness * 2.9;
-            sun.color.setStyle(sunC);
-        }
-
-        // ---- 环境光 ----
-        if (ambient) {
-            ambient.intensity = 0.08 + dayness * 0.37;
-            ambient.color.setRGB(0.18 + 0.62 * dayness, 0.12 + 0.63 * dayness, 0.28 + 0.47 * dayness);
-        }
-
-        // ---- 半球光 ----
-        if (hemi) {
-            hemi.intensity = 0.1 + dayness * 0.5;
-            hemi.color.setRGB(0.28 + 0.62 * dayness, 0.32 + 0.58 * dayness, 0.38 + 0.52 * dayness);
-            hemi.groundColor.setRGB(0.08 + 0.17 * dayness, 0.04 + 0.13 * dayness, 0.02 + 0.08 * dayness);
-        }
-
-        // ---- 补光/轮廓光 ----
-        if (window._fill) {
-            window._fill.intensity = 0.08 + dayness * 0.47;
-        }
-        if (window._rim) {
-            window._rim.intensity = 0.05 + dayness * 0.30;
-        }
-
-        // ---- 雾 ----
-        if (scene.fog) {
-            const f = dayness;
-            scene.fog.color.setRGB(0.08 + 0.47 * f, 0.10 + 0.50 * f, 0.13 + 0.57 * f);
-        }
-
-        // ---- 建筑立面夜景发光 ----
-        const nightFactor = 1.0 - U.clamp(dayness / 0.35, 0, 1); // dayness<0.35 开始发光
-        if (window._buildingMats) {
-            for (const m of window._buildingMats) {
-                m.emissiveIntensity = nightFactor * 2.8;
-            }
-        }
-
-        // ---- 低空雾夜间着色 ----
-        if (window._fogPlane && window._fogPlane.material.uniforms) {
-            const fColor = window._fogPlane.material.uniforms.uColor;
-            const fFog = window._fogPlane.material.uniforms.uFogColor;
-            fColor.value.setRGB(0.06+0.44*dayness, 0.08+0.42*dayness, 0.15+0.55*dayness);
-            fFog.value.setRGB(0.04+0.46*dayness, 0.06+0.44*dayness, 0.12+0.58*dayness);
-        }
-
-        // ---- 路灯亮灭 ----
-        const nightMode = dayness < 0.32;
-        if (window._streetLights) {
-            for (const pt of window._streetLights) {
-                pt.intensity = nightMode ? 8 : 0.04;
-                pt.visible = dayness < 0.45;
-            }
-        }
-        if (window._lampMats) {
-            for (const m of window._lampMats) {
-                m.emissiveIntensity = nightMode ? 1.8 : 0.15;
-            }
-        }
-
-        // ---- IBL 强度 ----
-        if (scene.environment && scene.environmentIntensity !== undefined) {
-            scene.environmentIntensity = 0.15 + dayness * 0.85;
-        }
-
-        window._daynessCache = dayness;
-    }
-
-    // 雾层设置 (P8: 雾色由 updateDayNight 动态控制)
+    // 雾层设置
     function setupFog() {
         // 场景全局雾
         scene.fog = new THREE.Fog(0x8899aa, 120, 450);
@@ -2029,23 +1648,17 @@
         facadeTextures['B'] = generateFacadeTexture('B');
         facadeTextures['C'] = generateFacadeTexture('C');
         facadeTextures['D'] = generateFacadeTexture('D');
-        // P8: 夜景窗格纹理
-        facadeNightTextures['A'] = generateNightFacadeTexture('A');
-        facadeNightTextures['B'] = generateNightFacadeTexture('B');
-        facadeNightTextures['C'] = generateNightFacadeTexture('C');
-        facadeNightTextures['D'] = generateNightFacadeTexture('D');
         const bldCount = buildBuildings();
         console.log(`[P4] 建筑: ${bldCount} 个网格体`);
 
-        // ---- P5: 街道家具 + 雾层 + P9 载具 ----
+        // ---- P5: 街道家具 + 雾层 ----
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
         setupFog();
-        // P9: 载具交通
-        const vehCount = buildVehicleTraffic();
-        console.log(`[P9] 载具: ${vehCount} 辆`);
-        // 初始日夜状态（正午附近）
-        updateDayNight(dayProgress);
+
+        // ---- P10: 行人系统 ----
+        spawnPedestrians();
+        console.log('[P10] 行人系统已启动');
 
         // PBR 展示圈 - 测试材质
         if (window._realTex) {
@@ -2127,12 +1740,6 @@
     function initInput() {
         window.addEventListener('keydown', e => { keys[e.code] = true; });
         window.addEventListener('keyup', e => { keys[e.code] = false; });
-        // 日夜循环快捷键: [ 减速, ] 加速, \ 暂停/恢复
-        window.addEventListener('keydown', e => {
-            if (e.code === 'BracketLeft') { dayCycleSpeed = Math.max(0.1, dayCycleSpeed - 0.5); }
-            if (e.code === 'BracketRight') { dayCycleSpeed = Math.min(10.0, dayCycleSpeed + 0.5); }
-            if (e.code === 'Backslash') { dayCycleSpeed = dayCycleSpeed > 0.05 ? 0 : 1.0; }
-        });
         document.addEventListener('mousemove', e => {
             if (isPointerLocked && gameStarted) {
                 player.yaw -= e.movementX * 0.002;
@@ -2162,13 +1769,8 @@
 
         if (gameStarted && !gamePaused) {
             updatePlayer(dt);
-            // 日夜循环推进
-            dayProgress += dt / dayCycleTime * dayCycleSpeed;
-            if (dayProgress >= 1.0) dayProgress -= 1.0;
-            updateDayNight(dayProgress);
-            updateVehicleTraffic(dt); // P9: 载具交通更新
+            updatePedestrians(dt);
         }
-        updateLOD(); // P7: LOD 切换
         updateCamera();
 
         if (window._skyDome) window._skyDome.material.uniforms.uTime.value += dt;
@@ -2180,11 +1782,8 @@
         if (composer) composer.render();
         else if (renderer) renderer.render(scene, camera);
 
-        // 显示 FPS + 日夜
-        const hours = Math.floor(dayProgress * 24);
-        const mins = Math.floor((dayProgress * 24 - hours) * 60);
-        const cycleLabel = dayCycleSpeed !== 1 ? ` x${dayCycleSpeed.toFixed(1)}` : '';
-        document.getElementById('info').textContent = `v8.0 (P9) | FPS: ${Math.round(1/dt)} | ${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}${cycleLabel}`;
+        // 显示 FPS
+        document.getElementById('info').textContent = `v8.0 | FPS: ${Math.round(1/dt)}`;
     }
 
     // ---- 启动 ----
@@ -2269,13 +1868,9 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v7.0 渲染管线保留版 加载完成');
+    console.log('星渊城 v8.0 P10 行人系统 加载完成');
 </script>
 </body></html>
-
-
-
-
 
 
 
