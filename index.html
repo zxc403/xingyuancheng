@@ -3029,10 +3029,16 @@
             scene.add(neonSigns);
         }
 
+        // P25B优化: 预存霓虹招牌位置，避免运行时 getMatrixAt 回读
+        const _neonSignPositions = selected ? selected.map(b => ({
+            x: b.cx, y: b.topY + 0.5, z: b.cz
+        })) : [];
+
         window._neonSystem = {
             lampPositions,
             lampBillboardA, lampBillboardB,
             neonSigns,
+            _neonSignPositions,
             blobTex,
             neonTexs,
             cyberColors,
@@ -3041,71 +3047,63 @@
     }
 
     // P25B: 每帧更新 Billboard 朝向相机 + 夜间渐显缩放
+    const _nsDummy = new THREE.Object3D(); // 复用，避免每帧 new
     function updateNeonSystem(dt) {
         const ns = window._neonSystem;
         if (!ns) return;
         const night = window._nightSmooth || 0;
+        const now = performance.now();
 
-        const camPos = camera.position;
-        const dummy = new THREE.Object3D();
+        const cx = camera.position.x;
+        const cz = camera.position.z;
 
         // ---- 路灯双层 Billboard ----
         if (ns.lampBillboardA && ns.lampBillboardB) {
-            const count = ns.lampPositions.length;
+            const positions = ns.lampPositions;
+            const count = positions.length;
             for (let i = 0; i < count; i++) {
-                const pos = ns.lampPositions[i];
-                // Billboard 朝向：正面面向相机
-                const dirX = camPos.x - pos.x;
-                const dirZ = camPos.z - pos.z;
-                const angle = Math.atan2(dirX, dirZ);
-
-                const scale = night * (3.5 + Math.sin(i * 1.3 + performance.now() * 0.001) * 0.4);
+                const p = positions[i];
+                const angle = Math.atan2(cx - p.x, cz - p.z);
+                const scale = night * (3.5 + Math.sin(i * 1.3 + now * 0.001) * 0.4);
 
                 // A 层
-                dummy.position.copy(pos);
-                dummy.position.y += 0.3;
-                dummy.rotation.set(0, angle, 0);
-                dummy.scale.setScalar(scale);
-                dummy.updateMatrix();
-                ns.lampBillboardA.setMatrixAt(i, dummy.matrix);
+                _nsDummy.position.set(p.x, p.y + 0.3, p.z);
+                _nsDummy.rotation.set(0, angle, 0);
+                _nsDummy.scale.setScalar(scale);
+                _nsDummy.updateMatrix();
+                ns.lampBillboardA.setMatrixAt(i, _nsDummy.matrix);
 
                 // B 层：微偏移 + 微旋转（模拟 GTA V 双层 glare）
-                dummy.rotation.z += performance.now() * 0.0003 + i * 0.7;
-                dummy.position.x += 0.15;
-                dummy.scale.setScalar(scale * 0.75);
-                dummy.updateMatrix();
-                ns.lampBillboardB.setMatrixAt(i, dummy.matrix);
+                _nsDummy.position.x += 0.15;
+                _nsDummy.rotation.set(0, angle, now * 0.0003 + i * 0.7);
+                _nsDummy.scale.setScalar(scale * 0.75);
+                _nsDummy.updateMatrix();
+                ns.lampBillboardB.setMatrixAt(i, _nsDummy.matrix);
             }
             ns.lampBillboardA.instanceMatrix.needsUpdate = true;
             ns.lampBillboardB.instanceMatrix.needsUpdate = true;
         }
 
         // ---- 霓虹招牌 Billboard ----
-        if (ns.neonSigns) {
-            const count = ns.neonSigns.count;
+        if (ns.neonSigns && ns._neonSignPositions) {
+            const positions = ns._neonSignPositions;
+            const count = Math.min(ns.neonSigns.count, positions.length);
             for (let i = 0; i < count; i++) {
-                const matrix = new THREE.Matrix4();
-                ns.neonSigns.getMatrixAt(i, matrix);
-                const pos = new THREE.Vector3().setFromMatrixPosition(matrix);
+                const p = positions[i];
+                const angle = Math.atan2(cx - p.x, cz - p.z);
+                const scale = night * (6.0 + Math.sin(i * 0.9 + now * 0.001) * 1.0);
 
-                const dirX = camPos.x - pos.x;
-                const dirZ = camPos.z - pos.z;
-                const angle = Math.atan2(dirX, dirZ);
-
-                const scale = night * (6.0 + Math.sin(i * 0.9) * 1.0);
-                // 还原原始位置（基于 _bldData 重建）
-                dummy.position.set(pos.x, pos.y, pos.z);
-                dummy.rotation.set(0, angle, 0);
-                dummy.scale.set(scale, scale * 0.25, 1);
-                dummy.updateMatrix();
-                ns.neonSigns.setMatrixAt(i, dummy.matrix);
+                _nsDummy.position.set(p.x, p.y, p.z);
+                _nsDummy.rotation.set(0, angle, 0);
+                _nsDummy.scale.set(scale, scale * 0.25, 1);
+                _nsDummy.updateMatrix();
+                ns.neonSigns.setMatrixAt(i, _nsDummy.matrix);
             }
             ns.neonSigns.instanceMatrix.needsUpdate = true;
-            // 夜间显示/日间隐藏
             ns.neonSigns.visible = night > 0.02;
         }
 
-        // 路灯 billboard 也夜间才可见
+        // 路灯 billboard 夜间可见
         if (ns.lampBillboardA) ns.lampBillboardA.visible = night > 0.02;
         if (ns.lampBillboardB) ns.lampBillboardB.visible = night > 0.02;
     }
