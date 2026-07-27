@@ -998,6 +998,8 @@
     // P7: 建筑记录（供 LOD 系统使用）
     const buildingRecords = [];
     window._buildingRecords = buildingRecords;
+    const buildingMats = []; // P8: 建筑立面材质追踪
+    window._buildingMats = buildingMats;
 
     function buildBuildings() {
         const bldGroup = new THREE.Group();
@@ -1066,12 +1068,26 @@
                     repTex.repeat.set(repW, repH);
                     matOpts.map = repTex;
                 }
+                // P8: 夜景 emissive 贴图
+                const nTex = facadeNightTextures[dist];
+                if (nTex) {
+                    const repH2 = Math.max(1, Math.floor(seg.h / 4));
+                    const repW2 = Math.max(1, Math.floor(Math.max(seg.w, seg.d) / 3));
+                    const nRepTex = nTex.clone();
+                    nRepTex.needsUpdate = true;
+                    nRepTex.repeat.set(repW2, repH2);
+                    matOpts.emissiveMap = nRepTex;
+                    matOpts.emissive = new THREE.Color(0xffaa44);
+                    matOpts.emissiveIntensity = 0.0;
+                }
                 const mat = new THREE.MeshStandardMaterial(matOpts);
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.set(cx, accumY + seg.h/2, cz);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
+                mesh.userData.isBuilding = true;
                 bldGroup.add(mesh);
+                buildingMats.push(mat);
                 accumY += seg.h;
             }
 
@@ -1305,6 +1321,75 @@
         return tex;
     }
 
+    // P8: 夜景窗格纹理（亮窗版本）
+    const facadeNightTextures = {};
+    function generateNightFacadeTexture(district) {
+        const size = 256;
+        const cv = document.createElement('canvas');
+        cv.width = size; cv.height = size;
+        const ctx = cv.getContext('2d');
+
+        let bgColor, litColor, winDensity, winShape, unlitColor;
+        switch(district) {
+        case 'A':
+            bgColor='#1a2230'; litColor='#ffdd88'; winDensity=0.55; winShape='tall'; unlitColor='#334466';
+            break;
+        case 'B':
+            bgColor='#3a3028'; litColor='#ffe8a0'; winDensity=0.40; winShape='square'; unlitColor='#887766';
+            break;
+        case 'C':
+            bgColor='#1a1510'; litColor='#ccaa66'; winDensity=0.25; winShape='wide'; unlitColor='#554433';
+            break;
+        case 'D':
+        default:
+            bgColor='#2a2218'; litColor='#ffdd88'; winDensity=0.35; winShape='square'; unlitColor='#776655';
+            break;
+        }
+
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, size, size);
+
+        const gap = 4;
+        const floorH = Math.floor(size / 12);
+        const colW = Math.floor(size / 8);
+        for (let row=0; row<12; row++) {
+            for (let col=0; col<8; col++) {
+                if (Math.random() > winDensity) continue;
+                const wx = col*colW + gap, wy = row*floorH + gap;
+                let ww, wh;
+                if (winShape==='tall')   { ww=colW*0.55; wh=floorH*0.75; }
+                else if (winShape==='wide') { ww=colW*0.75; wh=floorH*0.45; }
+                else { ww=colW*0.50; wh=floorH*0.55; }
+
+                ctx.fillStyle = '#0a0a0a';
+                ctx.fillRect(wx-1, wy-1, ww+2, wh+2);
+                const lit = Math.random() < 0.45;
+                ctx.fillStyle = lit ? litColor : unlitColor;
+                ctx.fillRect(wx, wy, ww, wh);
+                ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(wx+ww/2, wy); ctx.lineTo(wx+ww/2, wy+wh); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(wx, wy+wh/2); ctx.lineTo(wx+ww, wy+wh/2); ctx.stroke();
+            }
+        }
+
+        // 空调外机/百叶窗随机排布
+        ctx.fillStyle = '#333333';
+        for (let i=0; i<6; i++) {
+            const rx = 10 + Math.random()*220, ry = 10 + Math.random()*220;
+            ctx.fillRect(rx, ry, 26, 14);
+        }
+
+        const tex = new THREE.CanvasTexture(cv);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.generateMipmaps = true;
+        return tex;
+    }
+
     // 街道家具放置
     function buildStreetFurniture() {
         const furnGroup = new THREE.Group();
@@ -1483,6 +1568,22 @@
             scene.fog.color.setRGB(0.08 + 0.47 * f, 0.10 + 0.50 * f, 0.13 + 0.57 * f);
         }
 
+        // ---- 建筑立面夜景发光 ----
+        const nightFactor = 1.0 - U.clamp(dayness / 0.35, 0, 1); // dayness<0.35 开始发光
+        if (window._buildingMats) {
+            for (const m of window._buildingMats) {
+                m.emissiveIntensity = nightFactor * 2.8;
+            }
+        }
+
+        // ---- 低空雾夜间着色 ----
+        if (window._fogPlane && window._fogPlane.material.uniforms) {
+            const fColor = window._fogPlane.material.uniforms.uColor;
+            const fFog = window._fogPlane.material.uniforms.uFogColor;
+            fColor.value.setRGB(0.06+0.44*dayness, 0.08+0.42*dayness, 0.15+0.55*dayness);
+            fFog.value.setRGB(0.04+0.46*dayness, 0.06+0.44*dayness, 0.12+0.58*dayness);
+        }
+
         // ---- 路灯亮灭 ----
         const nightMode = dayness < 0.32;
         if (window._streetLights) {
@@ -1503,7 +1604,7 @@
         }
     }
 
-    // 雾层设置
+    // 雾层设置 (P8: 雾色由 updateDayNight 动态控制)
     function setupFog() {
         // 场景全局雾
         scene.fog = new THREE.Fog(0x8899aa, 120, 450);
@@ -1611,6 +1712,11 @@
         facadeTextures['B'] = generateFacadeTexture('B');
         facadeTextures['C'] = generateFacadeTexture('C');
         facadeTextures['D'] = generateFacadeTexture('D');
+        // P8: 夜景窗格纹理
+        facadeNightTextures['A'] = generateNightFacadeTexture('A');
+        facadeNightTextures['B'] = generateNightFacadeTexture('B');
+        facadeNightTextures['C'] = generateNightFacadeTexture('C');
+        facadeNightTextures['D'] = generateNightFacadeTexture('D');
         const bldCount = buildBuildings();
         console.log(`[P4] 建筑: ${bldCount} 个网格体`);
 
@@ -1845,6 +1951,7 @@
     console.log('星渊城 v7.0 渲染管线保留版 加载完成');
 </script>
 </body></html>
+
 
 
 
