@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v8.0 · P10 行人系统 (2026-07-27)</title>
+    <title>星渊城 v8.0 · P11B 天气系统 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -169,13 +169,16 @@
     function updateDayNight(dt) {
         DAYNIGHT.elapsed += dt * DAYNIGHT.targetSpeed;
         DAYNIGHT.prevDayness = DAYNIGHT.dayness;
-        // 使用平滑正弦曲线：phase偏移使起始为白天
         const fullCycle = DAYNIGHT.cycleDuration;
         const raw = Math.sin((DAYNIGHT.elapsed / fullCycle) * Math.PI * 2 + Math.PI * 0.75);
         DAYNIGHT.dayness = (raw + 1) / 2;
         const d = DAYNIGHT.dayness;
 
-        // 太阳方向：东→西弧线，正午高角
+        // ==== 天气系数 ====
+        const w = WEATHER.lerped;
+        const skyBright = 1 - w.skyDarken * 0.7;
+        const lightAtten = 1 - w.skyDarken * 0.5;
+
         const sunPhase = (DAYNIGHT.elapsed / fullCycle) * Math.PI * 2;
         const sunElevation = Math.sin(sunPhase - Math.PI * 0.15) * 0.75 + 0.25;
         const sunAzimuthX = Math.cos(sunPhase + Math.PI * 0.2);
@@ -187,22 +190,24 @@
         if (sd) {
             sd.material.uniforms.uDayness.value = d;
             sd.material.uniforms.uSunDirection.value.copy(sunDir);
-            // 日落色调：dayness<0.3时暖化
+            sd.material.uniforms.uCloudCover.value = w.cloudCover;
             const sunsetWarm = 1 - Math.max(0, (d - 0.15) / 0.2);
             sd.material.uniforms.uSunColor.value.copy(
                 new THREE.Color(1.0, 0.95 - sunsetWarm * 0.3, 0.8 - sunsetWarm * 0.5)
             );
+            // 阴天天空偏灰
+            const overcastGray = 1 - w.skyDarken;
             sd.material.uniforms.uZenithColor.value.copy(
                 new THREE.Color().lerpColors(
                     new THREE.Color(0.08, 0.08, 0.18),
-                    new THREE.Color(0.2, 0.5, 0.9),
+                    new THREE.Color(0.2*skyBright, 0.5*skyBright, 0.9*skyBright),
                     d
                 )
             );
             sd.material.uniforms.uHorizonColor.value.copy(
                 new THREE.Color().lerpColors(
-                    new THREE.Color(0.3, 0.15, 0.05),
-                    new THREE.Color(0.8, 0.85, 0.9),
+                    new THREE.Color(0.3*overcastGray, 0.15*overcastGray, 0.05*overcastGray),
+                    new THREE.Color(0.8*skyBright, 0.85*skyBright, 0.9*skyBright),
                     d
                 )
             );
@@ -215,45 +220,60 @@
             );
         }
 
-        // 更新太阳 DirectionalLight
+        // 太阳 DirectionalLight：天气削弱
         if (window._sun) {
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
-            updateLightIntensity(sun, 3.0, 3.0, 0.12, d);
+            updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
             updateLightColor(sun, 0xfff0d0, 0x445577, d);
         }
 
-        // 环境光：白天暖，夜晚暗蓝
         if (ambient) {
-            updateLightIntensity(ambient, 0.45, 0.45, 0.06, d);
+            updateLightIntensity(ambient, 0.45, 0.45*lightAtten, 0.06, d);
             updateLightColor(ambient, 0x8a7a6a, 0x223344, d);
         }
-
-        // 半球光
         if (hemi) {
-            updateLightIntensity(hemi, 0.6, 0.6, 0.06, d);
+            updateLightIntensity(hemi, 0.6, 0.6*lightAtten, 0.06, d);
             updateLightColor(hemi, 0x9ec5e8, 0x112233, d);
         }
-
-        // 补光
         const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c.intensity < 1);
-        if (fill) updateLightIntensity(fill, 0.55, 0.55, 0.04, d);
+        if (fill) updateLightIntensity(fill, 0.55, 0.55*lightAtten, 0.04, d);
 
-        // 雾色：白天淡蓝灰，夜晚深黑蓝
+        // 雾色 + 天气雾增强
         const fogDay = new THREE.Color(0x7a9ab8), fogNight = new THREE.Color(0x0a0e14);
         const fogColor = fogDay.clone().lerp(fogNight, 1 - d);
-        if (scene.fog) scene.fog.color.copy(fogColor);
-        if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015;
+        // 雨天雾向灰白偏移
+        const rainFog = new THREE.Color(0x8899aa);
+        const fogFinal = fogColor.clone().lerp(rainFog, w.fogBoost * 0.4);
+        if (scene.fog) scene.fog.color.copy(fogFinal);
+        if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015 + w.fogBoost * 0.006;
+        if (scene.fog instanceof THREE.Fog) scene.fog.far = 450 - w.fogBoost * 180;
 
-        // 雾平面颜色
         if (window._fogPlane) {
             const fp = window._fogPlane;
-            fp.material.uniforms.uColor.value.copy(fogColor).multiplyScalar(0.6);
-            fp.material.uniforms.uFogColor.value.copy(fogColor);
+            fp.material.uniforms.uColor.value.copy(fogFinal).multiplyScalar(0.6);
+            fp.material.uniforms.uFogColor.value.copy(fogFinal);
+            fp.material.uniforms.uTime && (fp.material.uniforms.uTime.value += dt * (1 + w.rainIntensity * 2));
         }
 
-        // Tone mapping exposure：夜晚略暗
-        if (renderer) renderer.toneMappingExposure = 0.65 + d * 0.55;
+        // Tone mapping
+        if (renderer) renderer.toneMappingExposure = 0.65 + d * 0.55 - w.skyDarken * 0.2;
+
+        // ==== 湿地面 ====
+        if (window._terrain && window._terrain.material) {
+            const tm = window._terrain.material;
+            if (tm.userData._baseRoughness === undefined) tm.userData._baseRoughness = tm.roughness;
+            if (tm.userData._baseEnvIntensity === undefined) tm.userData._baseEnvIntensity = tm.envMapIntensity || 0;
+            const wet = w.wetness;
+            tm.roughness = tm.userData._baseRoughness * (1 - wet * 0.75);
+            tm.envMapIntensity = (tm.userData._baseEnvIntensity || 0) + wet * 1.5;
+            // 湿地面颜色偏暗蓝灰
+            const baseColor = tm.userData._baseColor || (tm.color ? tm.color.getHex() : 0x555555);
+            if (!tm.userData._baseColor && tm.color) tm.userData._baseColor = baseColor;
+            const bc = new THREE.Color(baseColor);
+            const wetColor = new THREE.Color(0x3a4048);
+            if (tm.color) tm.color.copy(bc).lerp(wetColor, wet * 0.5);
+        }
 
         // ==== 夜景发光：阈值触发（避免每帧遍历所有材质） ====
         const nightThreshold = 0.35;
@@ -290,6 +310,236 @@
                 lamp.intensity = 1.0 + nf * 7.0;
             }
         }
+    }
+
+    // ===== P11B: 天气系统 =====
+    const WEATHER = {
+        states: ['Clear','Overcast','Drizzle','Rain','HeavyRain','Thunderstorm'],
+        current: 'Clear',
+        target: 'Clear',
+        progress: 1.0,
+        transitionSpeed: 0.25,
+        profiles: {
+            Clear:       { cloudCover:0.20,rainIntensity:0,  fogBoost:0,   skyDarken:0,   wetness:0,   lightningFreq:0 },
+            Overcast:    { cloudCover:0.85,rainIntensity:0,  fogBoost:0.10,skyDarken:0.25,wetness:0,   lightningFreq:0 },
+            Drizzle:     { cloudCover:0.90,rainIntensity:0.25,fogBoost:0.25,skyDarken:0.35,wetness:0.35,lightningFreq:0 },
+            Rain:        { cloudCover:0.95,rainIntensity:0.60,fogBoost:0.50,skyDarken:0.55,wetness:0.70,lightningFreq:0 },
+            HeavyRain:   { cloudCover:1.00,rainIntensity:1.00,fogBoost:0.80,skyDarken:0.75,wetness:1.00,lightningFreq:0.05 },
+            Thunderstorm:{ cloudCover:1.00,rainIntensity:0.85,fogBoost:0.95,skyDarken:0.85,wetness:1.00,lightningFreq:1.00 }
+        },
+        lerped: { cloudCover:0.20,rainIntensity:0,fogBoost:0,skyDarken:0,wetness:0,lightningFreq:0 },
+        wind: { dir: new THREE.Vector3(1,0,0.3).normalize(), baseSpeed:5, gust:0, time:0 },
+        timeSinceBolt: 0,
+        nextBoltIn: 10,
+        cycleTimer: 0,
+        cycleIdx: 0,
+        cycleOrder: ['Clear','Overcast','Drizzle','Rain','HeavyRain','Thunderstorm','HeavyRain','Rain','Drizzle','Overcast']
+    };
+
+    function setWeather(state) {
+        if (!WEATHER.states.includes(state)) return;
+        if (WEATHER.target === state && WEATHER.progress >= 1) return;
+        WEATHER.current = WEATHER.target;
+        WEATHER.target = state;
+        WEATHER.progress = 0;
+        if (WEATHER.progress >= 1) {
+            for (const k of Object.keys(WEATHER.lerped)) WEATHER.lerped[k] = WEATHER.profiles[WEATHER.current][k];
+        }
+    }
+
+    function updateWeather(dt) {
+        if (WEATHER.progress < 1) {
+            WEATHER.progress = Math.min(1, WEATHER.progress + dt * WEATHER.transitionSpeed);
+            const from = WEATHER.profiles[WEATHER.current];
+            const to = WEATHER.profiles[WEATHER.target];
+            for (const k of Object.keys(WEATHER.lerped)) {
+                WEATHER.lerped[k] = from[k] + (to[k] - from[k]) * WEATHER.progress;
+            }
+            if (WEATHER.progress >= 1) WEATHER.current = WEATHER.target;
+        }
+        // 风
+        WEATHER.wind.time += dt;
+        WEATHER.wind.gust = (Math.sin(WEATHER.wind.time * 0.7) * 0.5 + 0.5) * WEATHER.wind.baseSpeed * 0.6;
+        const spd = WEATHER.wind.baseSpeed + WEATHER.wind.gust;
+        WEATHER.wind.force = WEATHER.wind.dir.clone().multiplyScalar(spd);
+
+        // 自动循环（每 30 秒切换）
+        WEATHER.cycleTimer += dt;
+        if (WEATHER.cycleTimer > 30 && WEATHER.progress >= 1) {
+            WEATHER.cycleTimer = 0;
+            WEATHER.cycleIdx = (WEATHER.cycleIdx + 1) % WEATHER.cycleOrder.length;
+            setWeather(WEATHER.cycleOrder[WEATHER.cycleIdx]);
+        }
+
+        // 闪电计时
+        WEATHER.timeSinceBolt += dt;
+        const lf = WEATHER.lerped.lightningFreq;
+        if (lf > 0.01 && WEATHER.timeSinceBolt > WEATHER.nextBoltIn && WEATHER.progress >= 0.5) {
+            WEATHER.timeSinceBolt = 0;
+            WEATHER.nextBoltIn = 3 + Math.random() * (12 / lf);
+            triggerLightning();
+        }
+    }
+
+    // ---- 闪电 ----
+    let boltLine = null, boltGlow = null, boltLight = null;
+    function generateBolt(start, end, displace, branches) {
+        const pts = [start.clone(), end.clone()];
+        function recurse(a, b, d, depth) {
+            if (depth <= 0) return;
+            const mid = a.clone().add(b).multiplyScalar(0.5);
+            const perp = new THREE.Vector3(-(b.z-a.z), 0, b.x-a.x).normalize();
+            mid.x += perp.x * (Math.random()-0.5) * d * 2;
+            mid.z += perp.z * (Math.random()-0.5) * d * 2;
+            mid.y += (Math.random()-0.4) * d;
+            pts.splice(pts.indexOf(b), 0, mid);
+            const nd = d * 0.55;
+            recurse(a, mid, nd, depth-1);
+            recurse(mid, b, nd, depth-1);
+            // 分支
+            if (Math.random() < 0.3 && depth > 1 && branches) {
+                const branchEnd = mid.clone();
+                branchEnd.x += (Math.random()-0.5) * d * 3;
+                branchEnd.z += (Math.random()-0.5) * d * 3;
+                branchEnd.y -= Math.random() * d * 0.8;
+                pts.push(branchEnd);
+                recurse(mid, branchEnd, nd*0.7, depth-2);
+            }
+        }
+        recurse(start, end, displace, 5);
+        return pts;
+    }
+
+    function triggerLightning() {
+        if (!scene) return;
+        // 清理旧闪电
+        if (boltLine) { scene.remove(boltLine); boltLine.geometry.dispose(); boltLine.material.dispose(); boltLine=null; }
+        if (boltGlow) { scene.remove(boltGlow); boltGlow.geometry.dispose(); boltGlow.material.dispose(); boltGlow=null; }
+
+        const cpos = camera ? camera.position : new THREE.Vector3(0,30,0);
+        const angle = Math.random()*Math.PI*2;
+        const dist = 40 + Math.random()*80;
+        const sx = cpos.x + Math.cos(angle)*dist;
+        const sz = cpos.z + Math.sin(angle)*dist;
+        const sy = 50 + Math.random()*30;
+        const ey = getTerrainH(sx, sz) + 0.5;
+        const start = new THREE.Vector3(sx, sy, sz);
+        const end = new THREE.Vector3(sx, ey, sz);
+        const pts = generateBolt(start, end, 25, true);
+
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        boltLine = new THREE.Line(geo, new THREE.LineBasicMaterial({color:0xccddff, transparent:true, opacity:0.9, depthWrite:false}));
+        scene.add(boltLine);
+
+        const glowGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        boltGlow = new THREE.Line(glowGeo, new THREE.LineBasicMaterial({color:0xaaccff, transparent:true, opacity:0.3, linewidth:1, depthWrite:false}));
+        boltGlow.scale.set(1.3, 1.3, 1.3);
+        scene.add(boltGlow);
+
+        // 闪光点光源
+        if (!boltLight) {
+            boltLight = new THREE.PointLight(0xddeeff, 0, 200);
+            scene.add(boltLight);
+            window._boltLight = boltLight;
+        }
+        const midPt = pts[Math.floor(pts.length/2)];
+        boltLight.position.copy(midPt);
+        boltLight.intensity = 80;
+
+        // SkyDome 闪白
+        if (window._skyDome) {
+            const origSun = window._skyDome.material.uniforms.uSunColor.value.getHex();
+            window._skyDome.material.uniforms.uSunColor.value.set(0xffffff);
+            setTimeout(() => {
+                if (window._skyDome) window._skyDome.material.uniforms.uSunColor.value.setHex(origSun);
+            }, 80);
+        }
+
+        // 闪电衰减
+        const decayStart = performance.now();
+        function decayBolt() {
+            const elapsed = (performance.now() - decayStart) / 1000;
+            const fade = Math.max(0, 1 - elapsed * 3);
+            if (boltLine) boltLine.material.opacity = fade * 0.9;
+            if (boltGlow) boltGlow.material.opacity = fade * 0.3;
+            if (boltLight) boltLight.intensity = 80 * fade;
+            if (elapsed < 0.35) { requestAnimationFrame(decayBolt); }
+            else {
+                if (boltLine) { scene.remove(boltLine); boltLine.geometry.dispose(); boltLine.material.dispose(); boltLine=null; }
+                if (boltGlow) { scene.remove(boltGlow); boltGlow.geometry.dispose(); boltGlow.material.dispose(); boltGlow=null; }
+                if (boltLight) boltLight.intensity = 0;
+            }
+        }
+        requestAnimationFrame(decayBolt);
+    }
+
+    // ---- 雨系统 ----
+    let rainMesh = null;
+    function createRainSystem() {
+        if (rainMesh) return;
+        const count = isMobile ? 15000 : 40000;
+        const spawnW = 55, spawnH = 32;
+        const positions = new Float32Array(count * 6);
+        const seeds = new Float32Array(count * 2);
+        for (let i = 0; i < count; i++) {
+            const x = (Math.random()-0.5)*spawnW*2;
+            const y = Math.random()*spawnH;
+            const z = (Math.random()-0.5)*spawnW*2;
+            positions[i*6]=x; positions[i*6+1]=y; positions[i*6+2]=z;
+            positions[i*6+3]=x; positions[i*6+4]=y-0.35; positions[i*6+5]=z;
+            seeds[i*2]=Math.random(); seeds[i*2+1]=Math.random()*Math.PI*2;
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 2));
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: {value:0}, uIntensity: {value:0}, uWind: {value:new THREE.Vector3()},
+                uGravity: {value:-16}, uSpawnH: {value:spawnH}, uSpawnW: {value:spawnW},
+                uCameraPos: {value:new THREE.Vector3()}
+            },
+            vertexShader: `
+                attribute vec2 aSeed;
+                uniform float uTime, uIntensity, uGravity, uSpawnH, uSpawnW;
+                uniform vec3 uWind, uCameraPos;
+                varying float vAlpha;
+                void main() {
+                    float seed = aSeed.x, phase = aSeed.y;
+                    float speed = (0.5+seed*0.5)*abs(uGravity)*uIntensity;
+                    float t = mod(uTime*speed+phase*5.0, 1.0);
+                    float y0 = uSpawnH;
+                    float y = y0 - t*uSpawnH - uGravity*t*t*0.1;
+                    float xOffset = uWind.x*t*0.8 + uWind.z*t*0.3*seed;
+                    float zOffset = uWind.z*t*0.8 - uWind.x*t*0.3*seed;
+                    vec3 pos = position + vec3(xOffset, y-position.y, zOffset);
+                    pos.xz += uCameraPos.xz;
+                    vAlpha = smoothstep(0.0,0.08,t)*smoothstep(1.0,0.85,t)*uIntensity;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
+                }
+            `,
+            fragmentShader: `
+                varying float vAlpha;
+                void main() {
+                    gl_FragColor = vec4(0.75,0.82,0.95,vAlpha*0.45);
+                }
+            `,
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+        });
+        rainMesh = new THREE.LineSegments(geo, mat);
+        rainMesh.frustumCulled = false;
+        rainMesh.renderOrder = 1;
+        scene.add(rainMesh);
+        window._rainMesh = rainMesh;
+    }
+
+    function updateRainSystem(dt) {
+        if (!rainMesh) return;
+        const m = rainMesh.material;
+        m.uniforms.uTime.value += dt;
+        m.uniforms.uIntensity.value = WEATHER.lerped.rainIntensity;
+        m.uniforms.uWind.value.copy(WEATHER.wind.force || WEATHER.wind.dir);
+        if (camera) m.uniforms.uCameraPos.value.copy(camera.position);
+        rainMesh.visible = WEATHER.lerped.rainIntensity > 0.05;
     }
 
     // ---- PBR 纹理加载 ----
@@ -1784,6 +2034,11 @@
         terrain.receiveShadow = true;
         terrain.castShadow = true;
         terrain.name = 'terrain';
+        // 备份基础材质参数，供天气系统湿地面使用
+        groundMat.userData = groundMat.userData || {};
+        groundMat.userData._baseRoughness = groundMat.roughness;
+        groundMat.userData._baseEnvIntensity = groundMat.envMapIntensity || 0;
+        if (groundMat.color) groundMat.userData._baseColor = groundMat.color.getHex();
         scene.add(terrain);
         window._terrain = terrain;
 
@@ -1810,6 +2065,7 @@
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
         setupFog();
+        createRainSystem();
 
         // ---- P10: 行人系统 ----
         spawnPedestrians();
@@ -1894,7 +2150,17 @@
     // ---- 输入 ----
     function initInput() {
         window.addEventListener('keydown', e => { keys[e.code] = true; });
-        window.addEventListener('keyup', e => { keys[e.code] = false; });
+        window.addEventListener('keyup', e => {
+            keys[e.code] = false;
+            // K 键手动切换天气
+            if (e.code === 'KeyK' && !e.repeat) {
+                const idx = WEATHER.states.indexOf(WEATHER.target);
+                const next = WEATHER.states[(idx + 1) % WEATHER.states.length];
+                WEATHER.cycleTimer = 0; // 重置自动循环
+                setWeather(next);
+                console.log('[P11B] 天气切换至:', next);
+            }
+        });
         document.addEventListener('mousemove', e => {
             if (isPointerLocked && gameStarted) {
                 player.yaw -= e.movementX * 0.002;
@@ -1923,10 +2189,12 @@
         const dt = Math.min(clock.getDelta(), 0.05);
 
         if (gameStarted && !gamePaused) {
+            updateWeather(dt);
             updateDayNight(dt);
             updatePlayer(dt);
             updatePedestrians(dt);
         }
+        updateRainSystem(dt);
         updateCamera();
 
         if (window._skyDome) window._skyDome.material.uniforms.uTime.value += dt;
@@ -1938,8 +2206,9 @@
         if (composer) composer.render();
         else if (renderer) renderer.render(scene, camera);
 
-        // 显示 FPS + dayness
-        document.getElementById('info').textContent = `v8.0 P11A | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness > 0.5 ? '☀' : '🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}%`;
+        // 显示 FPS + dayness + 天气
+        const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
+        document.getElementById('info').textContent = `v8.0 P11B | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -2024,7 +2293,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v8.0 P10 行人系统 加载完成');
+    console.log('星渊城 v8.0 P11B 天气系统 加载完成');
 </script>
 </body></html>
 
