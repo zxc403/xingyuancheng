@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v12.0 · P14 3D音频系统 (2026-07-27)</title>
+    <title>星渊城 v13.0 · P16 水体系统 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -48,13 +48,14 @@
 
 <script type="module">
     // ============================================================
-    // 星渊城 v12.0 · P14 3D音频系统
+    // 星渊城 v13.0 · P16 水体系统
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
     // P13: 季节系统
     // P14: 3D音频系统（程序化合成：风/雨/雷/城市底噪/鸟鸣）
     // P15: 植被系统（Cross-Plane Instanced Billboard, 行道树沿路放置）
+    // P16: 水体系统（Gerstner 8波 + Schlick Fresnel + 泡沫 + 日夜/季节联动）
     // P17: 内饰映射系统
     // ============================================================
 
@@ -372,8 +373,8 @@
             HeavyRain:   { cloudCover:1.00,rainIntensity:1.00,fogBoost:0.80,skyDarken:0.75,wetness:1.00,lightningFreq:0.05 },
             Thunderstorm:{ cloudCover:1.00,rainIntensity:0.85,fogBoost:0.95,skyDarken:0.85,wetness:1.00,lightningFreq:1.00 }
         },
-        lerped: { cloudCover:0.20,rainIntensity:0,fogBoost:0,skyDarken:0,wetness:0,lightningFreq:0 },
-        wind: { dir: new THREE.Vector3(1,0,0.3).normalize(), baseSpeed:5, gust:0, time:0 },
+        lerped: { cloudCover:0.20,rainIntensity:0,fogBoost:0,skyDarken:0,wetness:0,lightningFreq:0,windSpeed:0 },
+        wind: { dir: new THREE.Vector3(1,0,0.3).normalize(), baseSpeed:5, gust:0, time:0, force: new THREE.Vector3(1,0,0) },
         timeSinceBolt: 0,
         nextBoltIn: 10,
         cycleTimer: 0,
@@ -448,6 +449,9 @@
         WEATHER.wind.gust = (Math.sin(WEATHER.wind.time * 0.7) * 0.5 + 0.5) * WEATHER.wind.baseSpeed * 0.6;
         const spd = WEATHER.wind.baseSpeed + WEATHER.wind.gust;
         WEATHER.wind.force = WEATHER.wind.dir.clone().multiplyScalar(spd);
+        // P1修复：风力归一化到0-1，存入lerped.windSpeed供音频系统使用
+        // baseSpeed=5→≈0.33，gust最大→baseSpeed*1.6=8→≈0.53，极端可达0.7+
+        WEATHER.lerped.windSpeed = Math.min(1, spd / 15);
 
         // 自动循环（每 30 秒切换，受季节影响概率偏向）
         WEATHER.cycleTimer += dt;
@@ -569,6 +573,11 @@
             }
         }
         requestAnimationFrame(decayBolt);
+
+        // P1修复：雷声音画同步 — 由 triggerLightning() 统一触发
+        // 延迟 0.8-2.3 秒模拟声速传播（每340m/s，闪电20-80m外）
+        const thunderDelay = 0.8 + Math.random() * 1.5;
+        setTimeout(() => _playThunder(), thunderDelay * 1000);
     }
 
     // ---- 雨系统 ----
@@ -2999,6 +3008,228 @@
         refBall.position.set(rx, getTerrainH(rx, rz) + 2, rz);
         refBall.castShadow = true;
         scene.add(refBall);
+
+        // ---- P16: 水体系统 ----
+        createWaterSystem();
+    }
+
+    // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
+    const WATER = {
+        level: -5.0,            // 水面高度
+        size: 500,              // 水面尺寸
+        segments: 256,          // 网格细分
+        mesh: null,
+        time: 0
+    };
+
+    function createWaterSystem() {
+        const geo = new THREE.PlaneGeometry(WATER.size, WATER.size, WATER.segments, WATER.segments);
+        geo.rotateX(-Math.PI / 2);
+
+        const waterMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uDayness: { value: 0.85 },
+                uSnowAmount: { value: 0 },
+                uCameraPos: { value: new THREE.Vector3() },
+                uEnvMap: { value: scene.environment || null },
+                uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.4) },
+                uWaterLevel: { value: WATER.level }
+            },
+            vertexShader: /* glsl */`
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vWaveHeight;
+                varying vec3 vViewDir;
+
+                uniform float uTime;
+
+                // Gerstner wave function
+                vec3 gerstner(vec2 uv, float A, vec2 dir, float steepness, float speed, float t) {
+                    vec2 k = normalize(dir);
+                    float w = sqrt(9.8 * length(dir));
+                    float phase = dot(k, uv) * length(dir) - w * speed * t;
+                    float s = steepness * A;
+                    return vec3(
+                        s * k.x * cos(phase),
+                        A * sin(phase),
+                        s * k.y * cos(phase)
+                    );
+                }
+
+                // Gerstner wave normal
+                vec3 gerstnerNormal(vec2 uv, float A, vec2 dir, float steepness, float speed, float t) {
+                    vec2 k = normalize(dir);
+                    float kLen = length(dir);
+                    float w = sqrt(9.8 * kLen);
+                    float phase = dot(k, uv) * kLen - w * speed * t;
+                    float WA = w * A;
+                    float s = steepness * A;
+                    float c = cos(phase), sPhase = sin(phase);
+                    return vec3(
+                        -k.x * WA * c,
+                        1.0 - s * kLen * sPhase,
+                        -k.y * WA * c
+                    );
+                }
+
+                void main() {
+                    vec3 pos = position;
+                    vec3 normal = vec3(0.0, 1.0, 0.0);
+
+                    // 8 Gerstner waves — varied directions, amplitudes, frequencies
+                    pos += gerstner(pos.xz, 0.18, vec2(1.0, 0.6),  0.35, 0.7, uTime);
+                    pos += gerstner(pos.xz, 0.13, vec2(-0.6, 1.0), 0.30, 0.9, uTime);
+                    pos += gerstner(pos.xz, 0.08, vec2(0.4, -0.85),0.45, 1.1, uTime);
+                    pos += gerstner(pos.xz, 0.06, vec2(-0.9, -0.3),0.50, 1.3, uTime);
+                    pos += gerstner(pos.xz, 0.04, vec2(0.7, -0.5), 0.40, 1.5, uTime);
+                    pos += gerstner(pos.xz, 0.03, vec2(-0.4, 0.75),0.55, 1.7, uTime);
+                    pos += gerstner(pos.xz, 0.02, vec2(0.2, -0.95),0.50, 1.9, uTime);
+                    pos += gerstner(pos.xz, 0.015,vec2(-0.7, -0.65),0.45, 2.1, uTime);
+
+                    normal += gerstnerNormal(pos.xz, 0.18, vec2(1.0, 0.6),  0.35, 0.7, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.13, vec2(-0.6, 1.0), 0.30, 0.9, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.08, vec2(0.4, -0.85),0.45, 1.1, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.06, vec2(-0.9, -0.3),0.50, 1.3, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.04, vec2(0.7, -0.5), 0.40, 1.5, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.03, vec2(-0.4, 0.75),0.55, 1.7, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.02, vec2(0.2, -0.95),0.50, 1.9, uTime);
+                    normal += gerstnerNormal(pos.xz, 0.015,vec2(-0.7, -0.65),0.45, 2.1, uTime);
+                    normal = normalize(normal);
+
+                    vWorldPos = pos;
+                    vWaveHeight = pos.y;
+                    vNormal = normal;
+                    vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+                    vViewDir = normalize(-mvPos.xyz);
+
+                    gl_Position = projectionMatrix * mvPos;
+                }
+            `,
+            fragmentShader: /* glsl */`
+                varying vec3 vWorldPos;
+                varying vec3 vNormal;
+                varying float vWaveHeight;
+                varying vec3 vViewDir;
+
+                uniform float uTime;
+                uniform float uDayness;
+                uniform float uSnowAmount;
+                uniform sampler2D uEnvMap;
+                uniform vec3 uSunDir;
+                uniform float uWaterLevel;
+
+                // Schlick Fresnel
+                float schlickFresnel(vec3 V, vec3 N, float ior) {
+                    float r0 = pow((1.0 - ior) / (1.0 + ior), 2.0);
+                    float cosTheta = clamp(1.0 - abs(dot(V, N)), 0.0, 1.0);
+                    return r0 + (1.0 - r0) * pow(cosTheta, 5.0);
+                }
+
+                void main() {
+                    vec3 N = normalize(vNormal);
+                    vec3 V = normalize(vViewDir);
+
+                    // Fresnel
+                    float fresnel = schlickFresnel(V, N, 1.33);
+
+                    // --- 反射色：从环境贴图采样 ---
+                    vec3 reflectDir = reflect(-V, N);
+                    vec3 reflectColor = vec3(0.3, 0.5, 0.7);
+                    #ifdef USE_ENVMAP
+                        reflectColor = textureCube(uEnvMap, reflectDir).rgb;
+                    #endif
+
+                    // --- 折射色：深水颜色 ---
+                    // 浅水偏青色，深水偏深蓝
+                    float depth = 1.0 - clamp(vWaveHeight - uWaterLevel + 3.0, 0.0, 3.0) / 3.0;
+                    vec3 shallowColor = vec3(0.1, 0.35, 0.45);  // 浅水青绿
+                    vec3 deepColor    = vec3(0.02, 0.08, 0.2);   // 深水暗蓝
+                    vec3 waterColor = mix(shallowColor, deepColor, depth);
+
+                    // --- 日夜联动：水温色调 ---
+                    // 白天偏蓝绿，夜晚偏暗暖
+                    vec3 dayWater   = waterColor;
+                    vec3 nightWater = waterColor * vec3(0.6, 0.5, 0.55);
+                    waterColor = mix(nightWater, dayWater, uDayness);
+
+                    // --- 冬季冰冻 ---
+                    float ice = uSnowAmount;
+                    vec3 iceColor = vec3(0.7, 0.78, 0.85);
+                    float iceFresnel = fresnel * (1.0 - ice * 0.4);
+                    waterColor = mix(waterColor, iceColor, ice * 0.6);
+
+                    // --- 镜面高光 (Blinn-Phong) ---
+                    vec3 sunDir = normalize(uSunDir);
+                    vec3 H = normalize(sunDir + V);
+                    float spec = pow(max(dot(N, H), 0.0), 256.0);
+                    vec3 specColor = vec3(1.0, 0.95, 0.8) * spec * 0.6 * uDayness;
+                    // 冬季减弱高光
+                    specColor *= (1.0 - ice * 0.8);
+
+                    // --- 泡沫 ---
+                    float foamThreshold = 0.08 + ice * 0.05;
+                    float foamMask = smoothstep(foamThreshold, foamThreshold + 0.06, vWaveHeight - uWaterLevel);
+                    vec3 foamColor = vec3(0.9, 0.92, 0.95);
+                    // 冬季泡沫变少
+                    foamMask *= (1.0 - ice * 0.5);
+
+                    // --- 高频法线细节（程序化涟漪） ---
+                    float ripple = 0.0;
+                    vec2 rippleUV = vWorldPos.xz * 40.0;
+                    ripple += sin(rippleUV.x * 1.3 + uTime * 2.5) * 0.3;
+                    ripple += cos(rippleUV.y * 1.7 - uTime * 3.0) * 0.3;
+                    ripple += sin((rippleUV.x + rippleUV.y) * 0.9 + uTime * 1.8) * 0.2;
+                    float rippleFresnel = fresnel * (0.85 + ripple * 0.15);
+                    rippleFresnel = clamp(rippleFresnel - ice * 0.2, 0.0, 1.0);
+
+                    // --- 合成 ---
+                    vec3 color = mix(waterColor, reflectColor, rippleFresnel);
+                    color += specColor;
+                    color = mix(color, foamColor, foamMask * 0.7);
+
+                    // --- 透明度：边缘透明 ---
+                    float alpha = 0.88;
+                    // 冬季冰面更不透明
+                    alpha = mix(alpha, 0.95, ice * 0.5);
+
+                    gl_FragColor = vec4(color, alpha);
+                }
+            `,
+            transparent: true,
+            depthWrite: true,
+            side: THREE.DoubleSide
+        });
+
+        const water = new THREE.Mesh(geo, waterMat);
+        water.position.y = WATER.level;
+        water.renderOrder = 1;
+        water.name = 'water';
+        water.receiveShadow = true;
+        scene.add(water);
+        WATER.mesh = water;
+        window._water = water;
+        console.log('[P16] 水体系统已创建 (Gerstner 8波 + Schlick Fresnel + 泡沫 + 日夜/季节联动)');
+    }
+
+    function updateWater(dt) {
+        if (!WATER.mesh) return;
+        WATER.time += dt;
+        const mat = WATER.mesh.material;
+        mat.uniforms.uTime.value = WATER.time;
+        mat.uniforms.uDayness.value = DAYNIGHT.dayness;
+        mat.uniforms.uSnowAmount.value = SEASON.lerped.snowAmount;
+        mat.uniforms.uCameraPos.value.copy(camera.position);
+        // 太阳方向（从天穹着色器复用逻辑）
+        const sd = window._sun ? window._sun.position.clone().normalize() : new THREE.Vector3(0.5, 0.8, 0.4);
+        mat.uniforms.uSunDir.value.copy(sd);
+        // 环境贴图
+        if (scene.environment) {
+            mat.uniforms.uEnvMap.value = scene.environment;
+            mat.defines = mat.defines || {};
+            mat.defines.USE_ENVMAP = '';
+        }
+        mat.needsUpdate = true;
     }
 
     // ---- 玩家移动 ----
@@ -3135,12 +3366,37 @@
         return { snapBuf, crackBuf, bassBuf, rumbleBuf };
     }
 
+    // P0修复：AudioContext 解锁 — 浏览器 autoplay policy 标准模式
+    // 参考 Matt Montag (mattmontag.com) 和 Chrome autoplay 官方文档
+    function _unlockAudioContext(ctx) {
+        if (!ctx || ctx.state !== 'suspended') return;
+        const events = ['touchstart', 'touchend', 'mousedown', 'keydown'];
+        const body = document.body;
+        function resume() {
+            if (ctx.state === 'suspended') {
+                ctx.resume().then(() => {
+                    console.log('[P14] AudioContext 已解锁 (state=' + ctx.state + ')');
+                }).catch(() => {});
+            }
+        }
+        function clean() {
+            events.forEach(e => body.removeEventListener(e, resume, false));
+            events.forEach(e => body.removeEventListener(e, clean, false));
+        }
+        events.forEach(e => body.addEventListener(e, resume, false));
+        events.forEach(e => body.addEventListener(e, clean, false));
+    }
+
     function initCityAudio() {
         if (CITY_AUDIO.initialized) return;
         const listener = window._audioListener;
         if (!listener || !listener.context) return;
         const ctx = listener.context;
         CITY_AUDIO.ctx = ctx;
+
+        // P0修复：AudioContext 解锁（Chrome/Safari autoplay policy要求用户手势后resume）
+        // 参考 Matt Montag 博客 (mattmontag.com) 与 greywen/web-weather 实践
+        _unlockAudioContext(ctx);
 
         // 总线：Compressor → MasterGain → Destination
         CITY_AUDIO.compressor = ctx.createDynamicsCompressor();
@@ -3201,10 +3457,14 @@
     }
 
     // 播放雷声（从缓冲区合成，经 distortion + echo 网络）
+    // P1修复：添加 cooldown 检查，由 triggerLightning() 统一调用，实现音画同步
     function _playThunder() {
         if (!CITY_AUDIO.enabled || !CITY_AUDIO.ctx) return;
         const ctx = CITY_AUDIO.ctx;
         const now = ctx.currentTime;
+        // cooldown 防止短时间内重复触发
+        if (now - CITY_AUDIO.thunder.lastTrigger < CITY_AUDIO.thunderCooldown) return;
+        CITY_AUDIO.thunder.lastTrigger = now;
         const bufs = CITY_AUDIO.thunder.buffers;
         if (!bufs) return;
         const mg = CITY_AUDIO.masterGain;
@@ -3283,13 +3543,13 @@
         const mg = CITY_AUDIO.masterGain;
         if (!mg) return;
 
-        // ---- 风声：频率和音量联动 wind.force 长度 ----
-        const windForce = WEATHER.lerped.windSpeed || WEATHER.wind.force && WEATHER.wind.force.length() || 0.5;
-        const windVol = Math.min(1, windForce * 2.5);
-        const windFreq = 150 + windForce * 800;
+        // ---- 风声：归一化风力(0-1) → 频率200-900Hz，音量0-0.25 ----
+        const windForce = WEATHER.lerped.windSpeed;
+        const windVol = windForce * 1.1;  // 0→0, 0.5→0.55, 1.0→1.1(由masterGain上限钳制)
+        const windFreq = 200 + windForce * 700;  // 200→900Hz
         if (CITY_AUDIO.wind.filter) {
-            CITY_AUDIO.wind.filter.frequency.setTargetAtTime(windFreq, now, 0.3);
-            CITY_AUDIO.wind.gain.gain.setTargetAtTime(windVol * 0.25, now, 0.3);
+            CITY_AUDIO.wind.filter.frequency.setTargetAtTime(windFreq, now, 0.5);
+            CITY_AUDIO.wind.gain.gain.setTargetAtTime(windVol * 0.25, now, 0.5);
         }
 
         // ---- 雨声：音量联动 rainIntensity，filter 联动雨量 ----
@@ -3310,18 +3570,8 @@
             CITY_AUDIO.traffic.gain.gain.setTargetAtTime(trafficTarget, now, 0.8);
         }
 
-        // ---- 雷声触发：监测 WEATHER 闪电事件 ----
-        const lf = WEATHER.lerped.lightningFreq || 0;
-        if (lf > 0.01 && now - CITY_AUDIO.thunder.lastTrigger > CITY_AUDIO.thunderCooldown) {
-            // 每帧概率触发（与 WEATHER.timeSinceBolt 同步感知）
-            const boltProb = lf * dt * 0.5;
-            if (Math.random() < boltProb) {
-                CITY_AUDIO.thunder.lastTrigger = now;
-                // 延迟播放模拟声速传播（闪电先亮，雷声后到）
-                const delay = 0.8 + Math.random() * 1.5;
-                setTimeout(() => _playThunder(), delay * 1000);
-            }
-        }
+        // ---- 雷声：不再独立触发，改由 triggerLightning() 统一调度（P1修复：音画同步） ----
+        // CITY_AUDIO.thunder.lastTrigger 仅保留供 _playThunder() 内部 cooldown 检查
 
         // ---- 鸟鸣：季节联动（春/夏活跃，秋/冬静默） ----
         const season = SEASON.name;
@@ -3411,6 +3661,7 @@
         updateSnowSystem(dt);
         updateTrees(dt);
         updateCityAudio(dt);
+        updateWater(dt);
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -3433,7 +3684,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v12.0 P14 | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v13.0 P16 | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -3530,7 +3781,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v12.0 P14 3D音频系统 加载完成');
+    console.log('星渊城 v13.0 P16 水体系统 加载完成');
 </script>
 </body></html>
 
