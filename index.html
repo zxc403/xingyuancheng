@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v9.0 · P13 季节系统 (2026-07-27)</title>
+    <title>星渊城 v11.0 · P15 植被系统 (2026-07-27)</title>
     <script>
     (function(){
         try {
@@ -41,17 +41,20 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v9.0</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v11.0</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v9.0 · P13 季节系统
+    // 星渊城 v11.0 · P15 植被系统
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
+    // P13: 季节系统
+    // P15: 植被系统（Cross-Plane Instanced Billboard, 行道树沿路放置）
+    // P17: 内饰映射系统
     // ============================================================
 
     import * as THREE from 'three';
@@ -802,6 +805,361 @@
         m.uniforms.uAmount.value = amount;
         m.uniforms.uWind.value.copy(WEATHER.wind.force || WEATHER.wind.dir);
         if (camera) m.uniforms.uCameraPos.value.copy(camera.position);
+    }
+
+    // ===== P15: 植被系统 (Cross-Plane Instanced Billboard) =====
+    let treeMesh = null;
+    let treeData = []; // {pos, scale, type, swayPhase, swaySpeed}
+    let treeAtlas = null;
+    const TREE_COUNT = 400;
+    const TREE_ATLAS_COLS = 3, TREE_ATLAS_ROWS = 2;
+    const TREE_TYPES = [
+        { name:'round',    canopyW:3.5, canopyH:4.0, trunkH:2.0, trunkW:0.3 },  // 圆形阔叶
+        { name:'cone',     canopyW:2.5, canopyH:5.5, trunkH:2.5, trunkW:0.25 }, // 锥形针叶
+        { name:'palm',     canopyW:4.0, canopyH:3.0, trunkH:4.0, trunkW:0.2 },  // 棕榈扇形
+        { name:'bush',     canopyW:2.0, canopyH:2.0, trunkH:0.6, trunkW:0.15 }, // 低矮灌木
+        { name:'weeping',  canopyW:3.0, canopyH:3.5, trunkH:2.5, trunkW:0.25 }, // 垂枝
+        { name:'columnar', canopyW:1.8, canopyH:5.0, trunkH:2.0, trunkW:0.2 },  // 柱状
+    ];
+
+    function generateTreeAtlas() {
+        const size = 512;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const cw = size / TREE_ATLAS_COLS;
+        const ch = size / TREE_ATLAS_ROWS;
+
+        function drawTreeCell(ctx, ox, oy, w, h, type) {
+            ctx.save();
+            const cx = ox + w / 2, baseY = oy + h;
+            const trunkH_ratio = type.trunkH / (type.trunkH + type.canopyH);
+            const canopyTop = baseY - (type.trunkH + type.canopyH) * (h / (type.trunkH + type.canopyH)) * 0.95;
+            const trunkTop = canopyTop;
+
+            // 树干 (棕色渐变)
+            const trunkGrad = ctx.createLinearGradient(0, trunkTop, 0, baseY);
+            trunkGrad.addColorStop(0, '#5a3a1a');
+            trunkGrad.addColorStop(0.6, '#4a2a10');
+            trunkGrad.addColorStop(1, '#3a1a08');
+            ctx.fillStyle = trunkGrad;
+            const tw = type.trunkW * 0.25 * w;
+            ctx.fillRect(cx - tw / 2, trunkTop, tw, baseY - trunkTop);
+
+            // 树冠 (渐变绿)
+            const cx2 = cx;
+            const canopyY = canopyTop;
+            const cR = type.canopyW * 0.15 * w;
+
+            if (type.name === 'round' || type.name === 'bush') {
+                const radGrad = ctx.createRadialGradient(cx2, canopyY + cR * 0.3, cR * 0.1, cx2, canopyY + cR * 0.3, cR);
+                radGrad.addColorStop(0, '#5a8a30');
+                radGrad.addColorStop(0.5, '#3a6a1a');
+                radGrad.addColorStop(0.85, '#2a4a10');
+                radGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = radGrad;
+                ctx.beginPath();
+                ctx.arc(cx2, canopyY + cR * 0.5, cR, 0, Math.PI * 2);
+                ctx.fill();
+                // 高点光
+                const hlGrad = ctx.createRadialGradient(cx2 - cR * 0.2, canopyY + cR * 0.2, cR * 0.05, cx2, canopyY + cR * 0.4, cR * 0.8);
+                hlGrad.addColorStop(0, 'rgba(140,200,80,0.5)');
+                hlGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = hlGrad;
+                ctx.beginPath();
+                ctx.arc(cx2, canopyY + cR * 0.5, cR, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (type.name === 'cone') {
+                const grad = ctx.createLinearGradient(0, canopyY, 0, canopyY + cR * 2.2);
+                grad.addColorStop(0, '#3a6a1a');
+                grad.addColorStop(0.6, '#2a5010');
+                grad.addColorStop(1, '#1a3008');
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.moveTo(cx2, canopyY - cR * 0.1);
+                ctx.lineTo(cx2 + cR * 0.6, canopyY + cR * 2.2);
+                ctx.lineTo(cx2 - cR * 0.6, canopyY + cR * 2.2);
+                ctx.closePath();
+                ctx.fill();
+                // 层次
+                for (let li = 0; li < 3; li++) {
+                    const ly = canopyY + cR * (0.6 + li * 0.55);
+                    const lw = cR * (0.55 - li * 0.12);
+                    ctx.fillStyle = li % 2 === 0 ? '#4a7a20' : '#3a5a14';
+                    ctx.beginPath();
+                    ctx.moveTo(cx2, ly - cR * 0.15);
+                    ctx.lineTo(cx2 + lw, ly + cR * 0.4);
+                    ctx.lineTo(cx2 - lw, ly + cR * 0.4);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            } else if (type.name === 'palm') {
+                // 扇形叶片
+                for (let fi = 0; fi < 7; fi++) {
+                    const angle = -Math.PI * 0.7 + fi * Math.PI * 1.4 / 6;
+                    const leafLen = cR * 1.3;
+                    ctx.strokeStyle = fi % 2 === 0 ? '#4a8a20' : '#3a6a14';
+                    ctx.lineWidth = 2 + Math.random() * 2;
+                    ctx.beginPath();
+                    const lx = cx2 + Math.cos(angle) * leafLen * 0.3;
+                    const ly = canopyY + Math.sin(angle) * leafLen * 0.3;
+                    ctx.moveTo(cx2, canopyY + cR * 0.2);
+                    ctx.quadraticCurveTo(lx, ly - leafLen * 0.3, cx2 + Math.cos(angle) * leafLen, canopyY + Math.sin(angle) * leafLen);
+                    ctx.stroke();
+                }
+                // 树干要更高更细
+                ctx.fillStyle = '#6a5a3a';
+                ctx.fillRect(cx2 - 1.5, trunkTop - type.trunkH * 0.3 * (h / 8), 3, baseY - trunkTop + type.trunkH * 0.3 * (h / 8));
+            } else if (type.name === 'weeping') {
+                const radGrad = ctx.createRadialGradient(cx2, canopyY + cR * 0.5, cR * 0.1, cx2, canopyY + cR * 0.5, cR);
+                radGrad.addColorStop(0, '#6a9a3a');
+                radGrad.addColorStop(0.5, '#4a6a20');
+                radGrad.addColorStop(0.85, '#2a4a10');
+                radGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = radGrad;
+                ctx.beginPath();
+                ctx.ellipse(cx2, canopyY + cR * 0.7, cR * 0.9, cR * 1.1, 0, 0, Math.PI * 2);
+                ctx.fill();
+                // 下垂线条
+                for (let di = 0; di < 8; di++) {
+                    const dx = cx2 + (di - 3.5) * cR * 0.25;
+                    ctx.strokeStyle = `rgba(60,120,30,${0.3 + Math.random() * 0.4})`;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(dx, canopyY + cR * 0.3);
+                    ctx.quadraticCurveTo(dx + (Math.random() - 0.5) * cR * 0.5, canopyY + cR * 1.2, dx, canopyY + cR * 1.6);
+                    ctx.stroke();
+                }
+            } else if (type.name === 'columnar') {
+                const grad = ctx.createLinearGradient(0, canopyY, 0, canopyY + cR * 2.5);
+                grad.addColorStop(0, '#4a7a20');
+                grad.addColorStop(1, '#1a3008');
+                ctx.fillStyle = grad;
+                const rTop = cR * 0.35, rBot = cR * 0.5;
+                ctx.beginPath();
+                ctx.moveTo(cx2 - rTop, canopyY);
+                ctx.lineTo(cx2 - rBot, canopyY + cR * 2.5);
+                ctx.lineTo(cx2 + rBot, canopyY + cR * 2.5);
+                ctx.lineTo(cx2 + rTop, canopyY);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        for (let row = 0; row < TREE_ATLAS_ROWS; row++) {
+            for (let col = 0; col < TREE_ATLAS_COLS; col++) {
+                const idx = row * TREE_ATLAS_COLS + col;
+                if (idx < TREE_TYPES.length) {
+                    const ox = col * cw, oy = row * ch;
+                    drawTreeCell(ctx, ox, oy, cw, ch, TREE_TYPES[idx]);
+                }
+            }
+        }
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.generateMipmaps = true;
+        return tex;
+    }
+
+    function createTreeCrossGeometry(typeIdx) {
+        const t = TREE_TYPES[typeIdx];
+        const totalH = t.trunkH + t.canopyH;
+        const hw = t.canopyW / 2;
+        const hh = totalH;
+        // 十字平面: 两片互相垂直的 Quad
+        const verts = [];
+        const uvs = [];
+        const indices = [];
+
+        // 计算该树型在图集中的 UV 区域
+        const cellW = 1 / TREE_ATLAS_COLS;
+        const cellH = 1 / TREE_ATLAS_ROWS;
+        const col = typeIdx % TREE_ATLAS_COLS;
+        const row = Math.floor(typeIdx / TREE_ATLAS_COLS);
+        const u0 = col * cellW + cellW * 0.08;
+        const u1 = (col + 1) * cellW - cellW * 0.08;
+        const v0 = row * cellH + cellH * 0.02;
+        const v1 = (row + 1) * cellH - cellH * 0.02;
+
+        // Plane 1: XZ cross plane (facing along Z axis)
+        const off = verts.length / 3;
+        verts.push(-hw, 0, 0, -hw, hh, 0, hw, hh, 0, hw, 0, 0);
+        uvs.push(u0, v0, u0, v1, u1, v1, u1, v0);
+        indices.push(off, off + 1, off + 2, off, off + 2, off + 3);
+
+        // Plane 2: XZ cross plane (facing along X axis)
+        const off2 = verts.length / 3;
+        verts.push(0, 0, -hw, 0, hh, -hw, 0, hh, hw, 0, 0, hw);
+        uvs.push(u0, v0, u0, v1, u1, v1, u1, v0);
+        indices.push(off2, off2 + 1, off2 + 2, off2, off2 + 2, off2 + 3);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo;
+    }
+
+    function spawnTrees() {
+        if (treeMesh) return;
+
+        // 生成纹理图集
+        treeAtlas = generateTreeAtlas();
+        const mat = new THREE.MeshStandardMaterial({
+            map: treeAtlas,
+            alphaTest: 0.15,
+            side: THREE.DoubleSide,
+            roughness: 0.9,
+            metalness: 0.0,
+            envMapIntensity: 0.3,
+            depthWrite: true,
+        });
+
+        // 使用一个通用几何体（所有树型共享，缩放补偿差异）
+        // 选择阔叶圆形的尺寸作为基准
+        const baseType = TREE_TYPES[0];
+        const baseGeo = createTreeCrossGeometry(0);
+
+        treeMesh = new THREE.InstancedMesh(baseGeo, mat, TREE_COUNT);
+        treeMesh.castShadow = true;
+        treeMesh.receiveShadow = true;
+        treeMesh.renderOrder = 1;
+
+        const dummy = new THREE.Object3D();
+        const treePositions = [];
+        const minDist = 6; // 树木最小间距
+
+        function tooClose(x, z) {
+            for (const p of treePositions) {
+                const d = Math.sqrt((p.x - x) ** 2 + (p.z - z) ** 2);
+                if (d < minDist) return true;
+            }
+            return false;
+        }
+
+        let placed = 0;
+        const MAX_ATTEMPTS = TREE_COUNT * 4;
+        let attempts = 0;
+
+        // 沿道路采样
+        const roadEdgeOffset = 5; // 道路边缘到树木的距离
+        while (placed < TREE_COUNT && attempts < MAX_ATTEMPTS) {
+            attempts++;
+            // 随机选一个路段
+            const seg = roadSegments.length > 0 ? rng.pick(roadSegments) : null;
+            if (!seg) break;
+
+            // 沿路段随机位置
+            const t = rng.float();
+            const dx = seg.x2 - seg.x1, dz = seg.z2 - seg.z1;
+            const len = Math.sqrt(dx * dx + dz * dz);
+            if (len < 3) continue;
+            const cx = seg.x1 + dx * t, cz = seg.z1 + dz * t;
+
+            // 垂直偏移（左右两侧随机）
+            const perpX = -dz / len, perpZ = dx / len;
+            const side = rng.bool(0.5) ? 1 : -1;
+            const offsetDist = roadEdgeOffset + seg.w / 2 + rng.range(0, 3);
+            const tx = cx + perpX * side * offsetDist;
+            const tz = cz + perpZ * side * offsetDist;
+
+            // 检查是否在有效范围内
+            if (Math.abs(tx) > 200 || Math.abs(tz) > 200) continue;
+            if (tooClose(tx, tz)) continue;
+
+            // 检查地形
+            const th = getTerrainH(tx, tz);
+            // 检查坡度（采样附近点）
+            const th2 = getTerrainH(tx + 3, tz);
+            const th3 = getTerrainH(tx, tz + 3);
+            if (Math.abs(th2 - th) > 2.5 || Math.abs(th3 - th) > 2.5) continue;
+
+            // 避开道路本身
+            if (nearRoad(tx, tz, 4)) continue;
+
+            treePositions.push({ x: tx, z: tz });
+
+            const treeType = rng.int(0, TREE_TYPES.length - 1);
+            const tp = TREE_TYPES[treeType];
+            const scaleVar = 0.7 + rng.float() * 0.6;
+            const totalH = (tp.trunkH + tp.canopyH) * scaleVar;
+
+            dummy.position.set(tx, th, tz);
+            dummy.rotation.y = rng.float() * Math.PI * 2;
+            dummy.scale.set(scaleVar, scaleVar, scaleVar);
+            dummy.updateMatrix();
+            treeMesh.setMatrixAt(placed, dummy.matrix);
+
+            // 初始季节色
+            const sc = new THREE.Color(SEASON.lerped.leafColor);
+            treeMesh.setColorAt(placed, sc);
+
+            treeData.push({
+                pos: new THREE.Vector3(tx, th, tz),
+                scale: scaleVar,
+                type: treeType,
+                swayPhase: rng.float() * Math.PI * 2,
+                swaySpeed: 0.3 + rng.float() * 0.7,
+                swayAmp: 0.15 + rng.float() * 0.35,
+            });
+
+            placed++;
+        }
+
+        console.log(`[P15] 树木: ${placed} 棵, 尝试 ${attempts} 次`);
+        treeMesh.count = placed;
+        treeMesh.instanceMatrix.needsUpdate = true;
+        if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
+        scene.add(treeMesh);
+        window._treeMesh = treeMesh;
+    }
+
+    function updateTrees(dt) {
+        if (!treeMesh) return;
+
+        const seasonColor = new THREE.Color(SEASON.lerped.leafColor);
+        const isWinter = SEASON.name === 'Winter';
+        const winterBlend = isWinter ? Math.min(1, (SEASON.seasonality - 0.65) / 0.15) : 0;
+        // 春秋过渡也做轻微缩放
+        const autumnBlend = SEASON.name === 'Autumn' ? Math.min(1, Math.abs(SEASON.seasonality - 0.45) / 0.15) : 0;
+        const scaleMult = 1.0 - winterBlend * 0.85 - autumnBlend * 0.1; // 冬季缩到15%
+
+        const dummy = new THREE.Object3D();
+        const windF = WEATHER.wind.force || new THREE.Vector3(0, 0, 0);
+        const windStr = windF.length();
+
+        for (let i = 0; i < treeMesh.count; i++) {
+            const td = treeData[i];
+            if (!td) continue;
+
+            // 季节颜色
+            treeMesh.setColorAt(i, seasonColor);
+
+            // 冬季缩放 + 风摇
+            const ss = td.scale * scaleMult;
+            dummy.position.copy(td.pos);
+            dummy.rotation.y = (td.swayPhase + td.swaySpeed * performance.now() * 0.001) % (Math.PI * 2);
+            dummy.scale.set(ss, ss, ss);
+
+            // 简单风摇：沿 X 微倾
+            if (windStr > 0.5 && scaleMult > 0.3) {
+                const sway = Math.sin(performance.now() * 0.001 * td.swaySpeed * 3 + td.swayPhase) * td.swayAmp * Math.min(windStr / 10, 1);
+                dummy.rotation.z = sway * 0.3;
+                dummy.rotation.x = sway * 0.2;
+            }
+
+            dummy.updateMatrix();
+            treeMesh.setMatrixAt(i, dummy.matrix);
+        }
+
+        treeMesh.instanceMatrix.needsUpdate = true;
+        if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
     }
 
     // ---- PBR 纹理加载 ----
@@ -2584,6 +2942,9 @@
         spawnPedestrians();
         console.log('[P10] 行人系统已启动');
 
+        // ---- P15: 植被系统 ----
+        spawnTrees();
+
         // PBR 展示圈 - 测试材质
         if (window._realTex) {
             const texList = ['concrete', 'brick', 'metal', 'rocky', 'plank', 'paving'];
@@ -2730,6 +3091,7 @@
         updateRainSystem(dt);
         updateLeafSystem(dt);
         updateSnowSystem(dt);
+        updateTrees(dt);
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -2752,7 +3114,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v10.0 P17 | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v11.0 P15 | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -2849,7 +3211,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v10.0 P17 内饰映射 加载完成');
+    console.log('星渊城 v11.0 P15 植被系统 加载完成');
 </script>
 </body></html>
 
