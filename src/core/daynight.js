@@ -210,12 +210,14 @@
         if (crossedIntoNight || crossedOutOfNight) {
             const nightFactor = d < nightThreshold ? (1 - d / nightThreshold) : 0;
 
-            // 建筑窗户 emissive
-            for (const bm of window._bldMeshes) {
-                if (bm.nightEmissive) {
-                    bm.mesh.material.emissive.copy(bm.nightEmissive);
-                    bm.mesh.material.emissiveIntensity = nightFactor * 0.7;
-                    bm.mesh.material.needsUpdate = true;
+            // P25C: 窗户光照系统接管建筑 emissive（per-pixel shader）
+            if (!window._p25cActive) {
+                for (const bm of window._bldMeshes) {
+                    if (bm.nightEmissive) {
+                        bm.mesh.material.emissive.copy(bm.nightEmissive);
+                        bm.mesh.material.emissiveIntensity = nightFactor * 0.7;
+                        bm.mesh.material.needsUpdate = true;
+                    }
                 }
             }
 
