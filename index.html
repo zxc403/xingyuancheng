@@ -3047,8 +3047,8 @@
         const neonCount = Math.min(uniqueBlds.length, 40);
         let neonSigns = null;
 
+        const selected = neonCount > 0 ? uniqueBlds.slice(0, neonCount) : [];
         if (neonCount > 0) {
-            const selected = uniqueBlds.slice(0, neonCount);
             const signGeo = new THREE.PlaneGeometry(6, 1.5);
             neonSigns = new THREE.InstancedMesh(signGeo, new THREE.MeshBasicMaterial({
                 map: neonTexs[0], transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -3079,7 +3079,7 @@
         }
 
         // P25B优化: 预存霓虹招牌位置，避免运行时 getMatrixAt 回读
-        const _neonSignPositions = selected ? selected.map(b => ({
+        const _neonSignPositions = selected.length ? selected.map(b => ({
             x: b.cx, y: b.topY + 0.5, z: b.cz
         })) : [];
 
