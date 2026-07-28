@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.7 · P26C 城市细节增强 (2026-07-28)</title>
+    <title>星渊城 v15.7 · P12-b 混合存档 v2 (2026-07-28)</title>
     <script>
     (function(){
         try {
@@ -48,7 +48,7 @@
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.7 · P26C 城市细节增强（路面标线+路灯多样+广告牌）
+    // 星渊城 v15.7 · P12-b 混合存档 v2
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -815,7 +815,18 @@
                 im.uniforms.uNightFactor.value = nightFactor;
             }
 
-            // 路灯由 P26C streetlights 模块管理
+            // 路灯
+            for (const lamp of window._lampLights) {
+                lamp.intensity = 1.0 + nightFactor * 7.0;
+            }
+        }
+
+        // 路灯渐变（在阈值区间内平滑）
+        if (d < nightThreshold + 0.08) {
+            const nf = d < nightThreshold ? (1 - d / nightThreshold) : 0;
+            for (const lamp of window._lampLights) {
+                lamp.intensity = 1.0 + nf * 7.0;
+            }
         }
 
         // P17: 内饰窗户持续渐变 (每帧更新 nightFactor)
@@ -2132,64 +2143,17 @@
 
     // 渲染道路到场景
     function renderRoads() {
-        // P26C-a: 路面标线纹理 (Canvas 2D 程序化生成, 含车道线/斑马线)
-        const roadMarkingCache = {};
-        function getRoadMarkingTex(segWidth, segLength, isArterial) {
-            const key = `${segWidth.toFixed(1)}_${isArterial}`;
-            if (roadMarkingCache[key]) return roadMarkingCache[key];
-            const texW = 512, texH = 256;
-            const cv = document.createElement('canvas');
-            cv.width = texW; cv.height = texH;
-            const ctx = cv.getContext('2d');
-            const shoulder = 0.6;
-            const totalW = segWidth + shoulder * 2;
-            const ppm = texW / totalW;
-            // 沥青底
-            ctx.fillStyle = '#3a3a3a'; ctx.fillRect(0, 0, texW, texH);
-            const imgD = ctx.getImageData(0, 0, texW, texH);
-            for (let i = 0; i < imgD.data.length; i += 4) {
-                const n = (Math.random() - 0.5) * 6;
-                imgD.data[i] += n; imgD.data[i + 1] += n; imgD.data[i + 2] += n;
-            }
-            ctx.putImageData(imgD, 0, 0);
-            // 路肩边线
-            const sL = shoulder * ppm, sR = (shoulder + segWidth) * ppm;
-            ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(sL, 0); ctx.lineTo(sL, texH); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(sR, 0); ctx.lineTo(sR, texH); ctx.stroke();
-            // 车道线
-            const laneCount = isArterial ? Math.max(2, Math.floor(segWidth / 3.5)) : 2;
-            const laneW = segWidth / laneCount;
-            for (let l = 1; l < laneCount; l++) {
-                const u = l * laneW;
-                const x = (shoulder + u) * ppm;
-                const nearCenter = Math.abs(u - segWidth / 2) < laneW * 0.6;
-                if (nearCenter && isArterial) {
-                    ctx.strokeStyle = 'rgba(255,180,0,0.85)'; ctx.lineWidth = 2.2;
-                    ctx.beginPath(); ctx.moveTo(x - 2, 0); ctx.lineTo(x - 2, texH); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(x + 2, 0); ctx.lineTo(x + 2, texH); ctx.stroke();
-                } else if (nearCenter) {
-                    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 1.8;
-                    ctx.setLineDash([8, 12]);
-                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, texH); ctx.stroke();
-                } else {
-                    ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.5;
-                    ctx.setLineDash([10, 16]);
-                    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, texH); ctx.stroke();
-                }
-            }
-            // 边缘实线
-            ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.8; ctx.setLineDash([]);
-            ctx.beginPath(); ctx.moveTo(sL + 4, 0); ctx.lineTo(sL + 4, texH); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(sR - 4, 0); ctx.lineTo(sR - 4, texH); ctx.stroke();
-            const tex = new THREE.CanvasTexture(cv);
-            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(1, Math.max(1, Math.floor(segLength / 8)));
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
-            tex.generateMipmaps = true;
-            roadMarkingCache[key] = tex;
-            return tex;
+        const roadTex = window._realTex && window._realTex['asphalt'];
+        let roadMat;
+        if (roadTex && roadTex.map) {
+            roadMat = new THREE.MeshStandardMaterial({
+                map: roadTex.map, roughnessMap: roadTex.roughnessMap,
+                normalMap: roadTex.normalMap, aoMap: roadTex.aoMap,
+                normalScale: new THREE.Vector2(0.8,0.8),
+                roughness: 0.85, metalness: 0.05, envMapIntensity: 0.8
+            });
+        } else {
+            roadMat = new THREE.MeshStandardMaterial({color:0x383838, roughness:0.85, metalness:0.05});
         }
 
         const roadGroup = new THREE.Group();
@@ -2207,14 +2171,9 @@
             if (len<0.5) continue;
             const angle = Math.atan2(dx, dz);
 
-            // 路面 (P26C-a: 使用程序化标线纹理)
+            // 路面
             const geo = new THREE.PlaneGeometry(s.w, len);
             geo.rotateX(-Math.PI/2);
-            const isArterial = s.w >= 7;
-            const markTex = getRoadMarkingTex(s.w, len, isArterial);
-            const roadMat = new THREE.MeshStandardMaterial({
-                map: markTex, roughness: 0.85, metalness: 0.05
-            });
             const m = new THREE.Mesh(geo, roadMat);
             const cx = (s.x1+s.x2)/2, cz = (s.z1+s.z2)/2;
             const hAvg = (getTerrainH(s.x1,s.z1)+getTerrainH(s.x2,s.z2))/2 + 0.08;
@@ -2856,104 +2815,17 @@
         });
     }
 
-    // ====== P26C-b: 路灯多样化系统 (InstancedMesh + 区域样式池) ======
-    window._streetlightData = [];
-
-    const LAMP_STYLES = {
-        A: { models:[{name:'modern_pole',poleH:8.0,poleR:0.12,armLen:2.0,lampR:0.25,lampColor:0xffeedd,colorTemp:4500},{name:'led_panel',poleH:8.5,poleR:0.10,armLen:1.6,lampR:0.35,lampColor:0xeeffff,colorTemp:5000}],spacing:30,intensity:10},
-        B: { models:[{name:'classic_arm',poleH:6.5,poleR:0.14,armLen:1.8,lampR:0.30,lampColor:0xffcc88,colorTemp:3000},{name:'warm_globe',poleH:6.0,poleR:0.13,armLen:1.5,lampR:0.32,lampColor:0xffaa66,colorTemp:2800}],spacing:25,intensity:7},
-        C: { models:[{name:'ind_truss',poleH:12.0,poleR:0.16,armLen:2.5,lampR:0.40,lampColor:0xffaa55,colorTemp:3500},{name:'high_mast',poleH:14.0,poleR:0.18,armLen:0,lampR:0.30,lampColor:0xffcc88,colorTemp:3800}],spacing:40,intensity:14},
-        D: { models:[{name:'waterfront',poleH:4.5,poleR:0.11,armLen:1.4,lampR:0.22,lampColor:0xffeecc,colorTemp:4000},{name:'sphere_low',poleH:4.0,poleR:0.12,armLen:1.2,lampR:0.28,lampColor:0xffeedd,colorTemp:4200}],spacing:20,intensity:5}
-    };
-
-    function createStreetlights() {
-        window._lampLights = []; window._lampLightData = [];
-        const segMap = {};
-        for (const s of roadSegments) {
-            const dx=s.x2-s.x1,dz=s.z2-s.z1,len=Math.sqrt(dx*dx+dz*dz);
-            if(len<10||s.w<7)continue;
-            const cx=(s.x1+s.x2)/2,cz=(s.z1+s.z2)/2;
-            const dist=getDistrict(cx,cz);
-            if(!segMap[dist])segMap[dist]=[];
-            segMap[dist].push({...s,len,cx,cz});
-        }
-        let totalPoles=0;
-        for(const [dist,style] of Object.entries(LAMP_STYLES)){
-            const segs=segMap[dist];if(!segs)continue;
-            for(let mi=0;mi<style.models.length;mi++){
-                const model=style.models[mi];
-                const candidates=[];
-                for(const s of segs){
-                    const dx=s.x2-s.x1,dz=s.z2-s.z1,nx=-dz/s.len,nz=dx/s.len;
-                    const steps=Math.floor(s.len/style.spacing);
-                    for(let i=1;i<steps;i++){
-                        if((i%style.models.length)!==mi)continue;
-                        const seed=s.x1*1000+s.z1*100+i;
-                        const rng=(n)=>{let h=(seed*9301+n*49297+233280)%233280;return h/233280;};
-                        const t=i/steps;
-                        const side=(i%2===0)?1:-1;
-                        const ox=s.x1+dx*t+nx*side*(s.w*0.5+1.5+rng(2)*0.4);
-                        const oz=s.z1+dz*t+nz*side*(s.w*0.5+1.5+rng(2)*0.4);
-                        const gh=getTerrainH(ox,oz);
-                        const hVar=model.poleH+(rng(3)-0.5)*0.5;
-                        candidates.push({ox,oz,gh,hVar,side});
-                    }
-                }
-                if(candidates.length===0)continue;
-                const poleGeo=new THREE.CylinderGeometry(model.poleR,model.poleR*1.2,model.poleH,8);
-                const g2=new THREE.CylinderGeometry(model.poleR*0.5,model.poleR*0.5,model.armLen,6);
-                g2.translate(model.armLen/2,0,0);g2.rotateZ(-Math.PI/2);g2.translate(0,model.poleH*0.85,0);
-                const g3=new THREE.SphereGeometry(model.lampR,8,5);g3.translate(model.armLen,model.poleH*0.85,0);
-                let mergedGeo;try{mergedGeo=THREE.BufferGeometryUtils.mergeGeometries([poleGeo,g2,g3]);}catch(e){mergedGeo=poleGeo;}
-                const mat=new THREE.MeshStandardMaterial({color:0x333333,roughness:0.4,metalness:0.8});
-                const im=new THREE.InstancedMesh(mergedGeo,mat,candidates.length);
-                im.castShadow=true;im.name=`streetlight_${dist}_${model.name}`;
-                const dummy=new THREE.Object3D();
-                for(let i=0;i<candidates.length;i++){
-                    const c=candidates[i];
-                    dummy.position.set(c.ox,c.gh,c.oz);
-                    dummy.rotation.set(0,c.side>0?Math.PI/2:-Math.PI/2,0);
-                    dummy.updateMatrix();im.setMatrixAt(i,dummy.matrix);
-                }
-                im.instanceMatrix.needsUpdate=true;
-                scene.add(im);
-                window._streetlightData.push({im,candidates,dist,model,style});
-                for(const c of candidates){
-                    const pt=new THREE.PointLight(model.lampColor,style.intensity,18,1.5);
-                    pt.position.set(c.ox,c.gh+model.poleH*0.85,c.oz);
-                    scene.add(pt);
-                    window._lampLights.push(pt);
-                    window._lampLightData.push({light:pt,baseIntensity:style.intensity,dist});
-                }
-                totalPoles+=candidates.length;
-            }
-        }
-        console.log(`[P26C-b] 路灯: ${totalPoles} 盏, ${window._streetlightData.length} InstancedMesh`);
-        return totalPoles;
-    }
-
-    function updateStreetlights(dt) {
-        const night = window._nightSmooth || (1-(window.DAYNIGHT?window.DAYNIGHT.litRatio||0:0));
-        if(window._lampLightData){
-            for(const ld of window._lampLightData) ld.light.intensity=ld.baseIntensity*night;
-        }
-        if(window._streetlightData){
-            for(const sm of window._streetlightData){
-                const t=sm.model.colorTemp/100;
-                let r,g,b;
-                if(t<=66){r=1;g=0.3900815787690196*Math.log(t)-0.6318414437886274;b=t<=20?0:0.543206789110196*Math.log(t-10)-1.19625408914;}
-                else{r=1.292936186*Math.pow(t-60,-0.1332047592);g=1.129890861*Math.pow(t-60,-0.0755148492);b=1;}
-                r=Math.max(0,Math.min(1,r));g=Math.max(0,Math.min(1,g));b=Math.max(0,Math.min(1,b));
-                sm.im.material.emissive=new THREE.Color(r*night*0.15,g*night*0.12,b*night*0.08);
-                sm.im.material.emissiveIntensity=0.3+night*0.7;
-            }
-        }
-    }
-
     // 街道家具放置
     function buildStreetFurniture() {
         const furnGroup = new THREE.Group();
         furnGroup.name = 'streetFurniture';
+
+        // 路灯几何复用
+        const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, 6, 8);
+        const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.8, 6);
+        const lampGeo = new THREE.SphereGeometry(0.35, 8, 6);
+        const poleMat = new THREE.MeshStandardMaterial({color:0x333333, roughness:0.4, metalness:0.8});
+        const lampMat = new THREE.MeshStandardMaterial({color:0xffeedd, roughness:0.3, metalness:0.2, emissive:0x332211, emissiveIntensity:0.5});
 
         // 树几何复用
         const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 3, 6);
@@ -2962,6 +2834,7 @@
         const trunkMat = new THREE.MeshStandardMaterial({color:0x5c3a1e, roughness:0.8});
         const leafMat = new THREE.MeshStandardMaterial({color:0x3a6b2a, roughness:0.7});
 
+        const lampInterval = 28;
         const treeInterval = 22;
 
         for (const s of roadSegments) {
@@ -2969,6 +2842,42 @@
             const len = Math.sqrt(dx*dx+dz*dz);
             if (len < 10) continue;
             const nx = -dz/len, nz = dx/len;
+            const isArterial = s.w >= 7;
+
+            // 路灯（主干道两侧）
+            if (isArterial) {
+                const steps = Math.floor(len / lampInterval);
+                for (let i=1; i<steps; i++) {
+                    const t = i/steps;
+                    const px = s.x1+dx*t, pz = s.z1+dz*t;
+                    for (const side of [-1, 1]) {
+                        const ox = px + nx * side * (s.w*0.5 + 1.5);
+                        const oz = pz + nz * side * (s.w*0.5 + 1.5);
+                        const gh = getTerrainH(ox, oz);
+
+                        const pole = new THREE.Mesh(poleGeo, poleMat);
+                        pole.position.set(ox, gh+3, oz);
+                        pole.castShadow = true;
+                        furnGroup.add(pole);
+
+                        const arm = new THREE.Mesh(armGeo, poleMat);
+                        arm.rotation.z = Math.PI/2;
+                        arm.position.set(ox + nx*side*0.9, gh+5.8, oz + nz*side*0.9);
+                        furnGroup.add(arm);
+
+                        const lamp = new THREE.Mesh(lampGeo, lampMat);
+                        lamp.position.set(ox + nx*side*1.7, gh+5.8, oz + nz*side*1.7);
+                        furnGroup.add(lamp);
+
+                        // 点光源
+                        const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
+                        pt.position.copy(lamp.position);
+                        furnGroup.add(pt);
+                        // P6+P8: 记录路灯以便日夜切换
+                        window._lampLights.push(pt);
+                    }
+                }
+            }
 
             // 树木（所有道路两侧）
             const tSteps = Math.floor(len / treeInterval);
@@ -3006,108 +2915,6 @@
         return furnGroup.children.length;
     }
 
-
-    // ====== P26C-c: 广告牌系统 (InstancedMesh + CanvasTexture) ======
-    window._billboardInstance = null;
-    window._billboardCandidates = [];
-
-    const AD_POOL = {
-        A:[{title:'星渊银行',subtitle:'您的信赖之选',bg:'#0a1628',fg:'#ffd700'},{title:'云核科技',subtitle:'量子计算新纪元',bg:'#050510',fg:'#00ccff'},{title:'天际证券',subtitle:'财富自由之路',bg:'#1a0a00',fg:'#ff8800'},{title:'霓裳时装',subtitle:'2026秋冬系列',bg:'#200010',fg:'#ff4488'},{title:'巅峰酒店',subtitle:'云端套房 星空泳池',bg:'#0a0a20',fg:'#ffaa44'}],
-        B:[{title:'老街火锅',subtitle:'百年传承 麻辣鲜香',bg:'#2a0800',fg:'#ff6644'},{title:'星光影院',subtitle:'暑期档火热上映中',bg:'#100520',fg:'#ff44aa'},{title:'惠民超市',subtitle:'新鲜每一天',bg:'#002200',fg:'#44ff44'},{title:'康健药房',subtitle:'24小时守护健康',bg:'#002020',fg:'#44ffcc'}],
-        C:[{title:'星海物流',subtitle:'全国次日达',bg:'#1a1a20',fg:'#ff8844'},{title:'铁拳机械',subtitle:'精密制造 品质保证',bg:'#202020',fg:'#ff6633'},{title:'绿源能源',subtitle:'清洁能源 点亮未来',bg:'#002010',fg:'#44ff66'}],
-        D:[{title:'码头酒吧',subtitle:'精酿啤酒 驻场乐队',bg:'#200808',fg:'#ff6644'},{title:'滨江画廊',subtitle:'当代艺术展进行中',bg:'#101010',fg:'#ffffff'},{title:'游艇俱乐部',subtitle:'扬帆起航 畅游星渊',bg:'#002040',fg:'#88ccff'}]
-    };
-
-    function generateAdTex(ad,w,h,ctx,W,H,ox,oy){
-        const cx=ox,cw=w*16*2,cy=oy,ch=h*9*2;
-        ctx.fillStyle=ad.bg;ctx.fillRect(cx,cy,cw,ch);
-        const gd=ctx.createLinearGradient(cx,cy,cx+cw,cy);
-        gd.addColorStop(0,'rgba(255,255,255,0)');gd.addColorStop(0.5,'rgba(255,255,255,0.06)');gd.addColorStop(1,'rgba(255,255,255,0)');
-        ctx.fillStyle=gd;ctx.fillRect(cx,cy+ch*0.15,cw,ch*0.03);ctx.fillRect(cx,cy+ch*0.82,cw,ch*0.02);
-        ctx.strokeStyle=ad.fg;ctx.lineWidth=3*2;ctx.globalAlpha=0.3;
-        ctx.strokeRect(cx+10,cy+10,cw-20,ch-20);ctx.globalAlpha=1;
-        ctx.fillStyle=ad.fg;ctx.font='bold 64px "PingFang SC","Microsoft YaHei",sans-serif';
-        ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText(ad.title,cx+cw/2,cy+ch*0.38);
-        ctx.globalAlpha=0.8;ctx.font='36px "PingFang SC","Microsoft YaHei",sans-serif';
-        ctx.fillText(ad.subtitle,cx+cw/2,cy+ch*0.62);ctx.globalAlpha=1;
-        ctx.fillStyle=ad.fg;ctx.globalAlpha=0.4;
-        ctx.fillRect(cx+5,cy+ch*0.78,80,6);ctx.fillRect(cx+cw-85,cy+ch*0.78,80,6);ctx.globalAlpha=1;
-        return {u0:cx/W,u1:(cx+cw)/W,v0:cy/H,v1:(cy+ch)/H};
-    }
-
-    function createBillboards(){
-        window._billboardCandidates=[];
-        const seed=137;
-        for(let i=0;i<window._bldData.length;i++){
-            const b=window._bldData[i],dist=b.dist;
-            const s=seed+i*73;
-            const rng=(n)=>{let h=(s*9301+n*49297+233280)%233280;return h/233280;};
-            if(rng(0)>0.2||b.w<4||b.topY<8)continue;
-            const faces=[];
-            if(rng(1)>0.5)faces.push({x:b.cx,z:b.cz+b.d/2+0.15,rotY:0,wallLen:b.w});
-            if(rng(2)>0.5)faces.push({x:b.cx,z:b.cz-b.d/2-0.15,rotY:Math.PI,wallLen:b.w});
-            if(rng(3)>0.5)faces.push({x:b.cx+b.w/2+0.15,z:b.cz,rotY:Math.PI/2,wallLen:b.d});
-            if(rng(4)>0.5)faces.push({x:b.cx-b.w/2-0.15,z:b.cz,rotY:-Math.PI/2,wallLen:b.d});
-            const maxF=Math.min(2,faces.length);
-            const picked=[];for(let fi=0;fi<maxF;fi++){let idx=Math.floor(rng(5+fi)*faces.length);if(!picked.includes(idx))picked.push(idx);}
-            const pool=AD_POOL[dist]||AD_POOL['B'];
-            const ad=pool[Math.floor(rng(10)*pool.length)];
-            for(const fi of picked){
-                const f=faces[fi];
-                const billW=Math.min(4.5,f.wallLen*0.7),billH=billW*0.5625;
-                const hFrac=0.3+rng(11)*0.5;
-                const y=Math.max(getTerrainH(f.x,f.z)+3,b.topY*hFrac);
-                window._billboardCandidates.push({x:f.x,y,z:f.z,rotY:f.rotY,w:billW,h:billH,dist,ad});
-            }
-        }
-        const N=window._billboardCandidates.length;
-        if(N===0)return 0;
-        const COLS=Math.min(N,8),ROWS=Math.ceil(N/COLS);
-        const CELL_W=256,CELL_H=144,atlasW=CELL_W*COLS,atlasH=CELL_H*ROWS;
-        const cv=document.createElement('canvas');cv.width=atlasW;cv.height=atlasH;
-        const ctx=cv.getContext('2d');
-        const uvs=[];
-        for(let i=0;i<N;i++){
-            const col=i%COLS,row=Math.floor(i/COLS);
-            const uv=generateAdTex(window._billboardCandidates[i].ad,4,2.25,ctx,atlasW,atlasH,col*CELL_W,row*CELL_H);
-            uvs.push(uv);
-        }
-        const tex=new THREE.CanvasTexture(cv);
-        tex.colorSpace=THREE.SRGBColorSpace;tex.magFilter=THREE.LinearFilter;tex.minFilter=THREE.LinearMipmapLinearFilter;tex.generateMipmaps=true;
-
-        const geos=[];
-        for(let i=0;i<N;i++){
-            const c=window._billboardCandidates[i],uv=uvs[i];
-            const geo=new THREE.PlaneGeometry(c.w,c.h);
-            const pos=geo.attributes.position;
-            const uvAttr=geo.attributes.uv;
-            for(let j=0;j<uvAttr.count;j++){
-                const u0=uvAttr.getX(j),v0=uvAttr.getY(j);
-                uvAttr.setXY(j,uv.u0+u0*(uv.u1-uv.u0),uv.v0+v0*(uv.v1-uv.v0));
-            }
-            geo.translate(c.x,c.y,c.z);
-            geo.rotateY(c.rotY);
-            geos.push(geo);
-        }
-        let mergedGeo;
-        try{mergedGeo=THREE.BufferGeometryUtils.mergeGeometries(geos);}catch(e){mergedGeo=geos[0];}
-        const mat=new THREE.MeshStandardMaterial({map:tex,roughness:0.6,metalness:0.1,emissive:new THREE.Color(0),emissiveIntensity:0});
-        const mesh=new THREE.Mesh(mergedGeo,mat);
-        mesh.name='billboards';mesh.renderOrder=3;mesh.castShadow=false;mesh.receiveShadow=true;
-        scene.add(mesh);
-        window._billboardInstance=mesh;
-        window._billboardCandidates.forEach(c=>{delete c.ad;});
-        console.log(`[P26C-c] 广告牌: ${N} 个, atlas=${atlasW}x${atlasH}, DC=1`);
-        return N;
-    }
-
-    function updateBillboards(dt){
-        const mesh=window._billboardInstance;if(!mesh)return;
-        const night=window._nightSmooth||(1-(window.DAYNIGHT?window.DAYNIGHT.litRatio||0:0));
-        const pulse=0.7+0.3*Math.sin((performance.now()*0.001)%(Math.PI*2));
-        mesh.material.emissiveIntensity=night*pulse*0.8;
-    }
 
     // ====== MODULE: Neon Signs (P25B) ======
     // ===== P25B: 霓虹招牌 + GTA V 双层 Billboard 辉光系统 =====
@@ -3978,31 +3785,99 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
 
     function seedFromURL() { const m = location.search.match(/[?&]seed=(\d+)/); return m ? parseInt(m[1], 10) : 0; }
 
+    // ===== P12-b: CRC32 校验 =====
+    function crc32(str) {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < str.length; i++) {
+            crc ^= str.charCodeAt(i);
+            for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    // ===== P12-b: 稳定实例 ID =====
+    window._stableId = function(gridX, gridZ, entityType, index) {
+        return `g${gridX}_${gridZ}_${entityType}_${index}`;
+    };
+    // 实例注册表：stableId -> { mesh, type }
+    window._entityMap = new Map();
+
+    // ===== P12-b: GPU 资源清理 =====
+    function disposeMaterial(m) {
+        if (!m) return;
+        if (Array.isArray(m)) { m.forEach(disposeMaterial); return; }
+        Object.values(m).forEach(v => { if (v && v.isTexture) v.dispose(); });
+        m.dispose();
+    }
+    function disposeScene(scene) {
+        scene.traverse(obj => {
+            if (obj.geometry) obj.geometry.dispose();
+            if (obj.material) disposeMaterial(obj.material);
+        });
+    }
+
     function saveGame() {
         try {
-            const data = { version: 2, seed: _citySeed,
-                daynight: { elapsed: DAYNIGHT.elapsed },
-                weather: { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
-                season: { seasonality: SEASON.seasonality, name: SEASON.name },
-                player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch },
-                timestamp: Date.now()
+            const subSeeds = {
+                terrain: _citySeed + '-T',
+                buildings: _citySeed + '-B',
+                streetFurniture: _citySeed + '-F'
             };
-            localStorage.setItem('sc4like.save.v1', JSON.stringify(data));
+            const deltas = {}; // P12-c 各管线填充 Delta
+            const body = {
+                version: 3, seed: _citySeed, subSeeds,
+                params: {
+                    daynight: { elapsed: DAYNIGHT.elapsed },
+                    weather: { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
+                    season: { seasonality: SEASON.seasonality, name: SEASON.name },
+                    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }
+                },
+                deltas, timestamp: Date.now()
+            };
+            body.checksum = crc32(JSON.stringify({ version: body.version, seed: body.seed, params: body.params, deltas: body.deltas, timestamp: body.timestamp }));
+            localStorage.setItem('sc4like.save.v2', JSON.stringify(body));
             return true;
-        } catch(e) { console.warn('[P12] 存档失败'); return false; }
+        } catch(e) { console.warn('[P12-b] 存档失败', e); return false; }
     }
 
     function loadSave() {
-        try { const r = localStorage.getItem('sc4like.save.v1'); return r ? JSON.parse(r) : null; }
-        catch(e) { return null; }
+        // 优先读取 v2，回退 v1
+        try {
+            const r2 = localStorage.getItem('sc4like.save.v2');
+            if (r2) {
+                const d = JSON.parse(r2);
+                const ck = crc32(JSON.stringify({ version: d.version, seed: d.seed, params: d.params, deltas: d.deltas || {}, timestamp: d.timestamp }));
+                if (ck === d.checksum) return d;
+                console.warn('[P12-b] 存档校验失败，降级为种子重建');
+                return null;
+            }
+        } catch(e) {}
+        try {
+            const r1 = localStorage.getItem('sc4like.save.v1');
+            if (!r1) return null;
+            const od = JSON.parse(r1);
+            console.log('[P12-b] 从 v1 旧存档迁移');
+            return {
+                version: 3, seed: od.seed, subSeeds: { terrain: od.seed + '-T', buildings: od.seed + '-B', streetFurniture: od.seed + '-F' },
+                params: {
+                    daynight: od.daynight || { elapsed: DAYNIGHT.elapsed },
+                    weather: od.weather || { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
+                    season: od.season || { seasonality: SEASON.seasonality, name: SEASON.name },
+                    player: od.player || { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }
+                },
+                deltas: {}, timestamp: od.timestamp || Date.now()
+            };
+        } catch(e) { return null; }
     }
 
     function restoreState(d) {
         if (!d) return;
-        DAYNIGHT.elapsed = d.daynight.elapsed;
-        if (d.weather) { WEATHER.current = d.weather.current; WEATHER.target = d.weather.target; WEATHER.progress = d.weather.progress; WEATHER.cycleTimer = d.weather.cycleTimer; }
-        if (d.season) { SEASON.seasonality = d.season.seasonality; SEASON.lerpedSeasonality = d.season.seasonality; SEASON.name = d.season.name; }
-        if (d.player) { player.x = d.player.x; player.y = d.player.y; player.z = d.player.z; player.yaw = d.player.yaw; player.pitch = d.player.pitch; }
+        const p = d.params;
+        if (p.daynight) DAYNIGHT.elapsed = p.daynight.elapsed;
+        if (p.weather) { WEATHER.current = p.weather.current; WEATHER.target = p.weather.target; WEATHER.progress = p.weather.progress; WEATHER.cycleTimer = p.weather.cycleTimer; }
+        if (p.season) { SEASON.seasonality = p.season.seasonality; SEASON.lerpedSeasonality = p.season.seasonality; SEASON.name = p.season.name; }
+        if (p.player) { player.x = p.player.x; player.y = p.player.y; player.z = p.player.z; player.yaw = p.player.yaw; player.pitch = p.player.pitch; }
+        // P12-c 待实现：遍历 d.deltas 按 stableId 匹配实例覆盖状态
     }
 
     // ---- 构建世界（P1+P2+P3+P4+P5: 地形 + 路网 + 地块 + 建筑 + 立面/家具/雾） ----
@@ -4079,16 +3954,8 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
 
-        // ---- P26C-b: 路灯多样化 ----
-        const lampCount = createStreetlights();
-        console.log(`[P26C-b] 路灯: ${lampCount} 盏`);
-
         // ---- P25B: 霓虹招牌 + 双层 Billboard ----
         createNeonSystem();
-
-        // ---- P26C-c: 广告牌系统 ----
-        const billboardCount = createBillboards();
-        console.log(`[P26C-c] 广告牌: ${billboardCount} 个`);
 
         setupFog();
         createRainSystem();
@@ -4163,6 +4030,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         createAtmosphere();
     }
 
+    // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     // ---- 玩家移动 ----
     function updatePlayer(dt) {
         if (!gameStarted || gamePaused) return;
@@ -4191,6 +4059,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         camera.lookAt(player.pos.x, player.pos.y + player.height * 0.6, player.pos.z);
     }
 
+    // ===== P14: 3D音频系统（程序化合成，零外部文件） =====
     // ---- 输入 ----
     function initInput() {
         window.addEventListener('keydown', e => { keys[e.code] = true; });
@@ -4276,8 +4145,6 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         updateAtmosphere(dt);
         updateNeonSystem(dt);
         updateWindowLights(dt);
-        updateStreetlights(dt);
-        updateBillboards(dt);
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -4310,7 +4177,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.7 P26C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.7 P12-b | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4407,7 +4274,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
     }, 12000);
 
     init();
-    console.log('星渊城 v15.7 P26C 城市细节增强（标线+路灯+广告牌）加载完成');
+    console.log('星渊城 v15.7 P12-b 混合存档 v2 加载完成');
     // ====== MODULE: Water + Reflection + Atmosphere ======
     // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     const WATER = {
