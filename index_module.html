@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.7 · P12-b 混合存档 v2 (2026-07-28)</title>
+    <title>星渊城 v15.7 · P12-c 稳定ID+Delta导出 (2026-07-28)</title>
     <script>
     (function(){
         try {
@@ -41,14 +41,14 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.7</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v15.7</h1><p id="loadText">P12-c 稳定ID注册中...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.7 · P12-b 混合存档 v2
+    // 星渊城 v15.7 · P12-c 稳定ID+Delta导出
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -2467,6 +2467,12 @@
                 });
                 // P25B: 记录建筑位置供霓虹招牌放置
                 window._bldData.push({ cx: parseFloat(cx.toFixed(1)), cz: parseFloat(cz.toFixed(1)), topY: accumY + seg.h, w: seg.w, d: seg.d, dist });
+                // P12-c: 建筑网格稳定 ID 注册
+                const bldSid = window._stableId(plot.cx, plot.cz, 'bld', idx);
+                mesh.userData.stableId = bldSid;
+                mesh.userData._dirty = false;
+                mesh.userData._delta = {};
+                window._entityMap.set(bldSid, { mesh, type: 'building', plot: { cx: plot.cx, cz: plot.cz, dist, w: seg.w, h: seg.h, d: seg.d } });
                 accumY += seg.h;
             }
 
@@ -2859,6 +2865,12 @@
                         pole.position.set(ox, gh+3, oz);
                         pole.castShadow = true;
                         furnGroup.add(pole);
+                        // P12-c: 路灯稳定 ID 注册
+                        const lampSid = window._stableId(s.x1, s.z1, 'lamp', i * 2 + (side < 0 ? 0 : 1));
+                        pole.userData.stableId = lampSid;
+                        pole.userData._dirty = false;
+                        pole.userData._delta = {};
+                        window._entityMap.set(lampSid, { mesh: pole, type: 'lamp', pt, pos: { x: ox, y: gh+3, z: oz } });
 
                         const arm = new THREE.Mesh(armGeo, poleMat);
                         arm.rotation.z = Math.PI/2;
@@ -2907,6 +2919,12 @@
                 tree.position.set(ox, gh, oz);
                 tree.scale.setScalar(0.7 + Math.sin(i*1.7)*0.3);
                 furnGroup.add(tree);
+                // P12-c: 树木稳定 ID 注册
+                const treeSid = window._stableId(s.x1, s.z1, 'tree', i);
+                tree.userData.stableId = treeSid;
+                tree.userData._dirty = false;
+                tree.userData._delta = {};
+                window._entityMap.set(treeSid, { mesh: tree, type: 'tree', pos: { x: ox, y: gh, z: oz } });
             }
         }
 
@@ -3047,6 +3065,12 @@
             }
             neonSigns.instanceMatrix.needsUpdate = true;
             if (neonSigns.instanceColor) neonSigns.instanceColor.needsUpdate = true;
+            // P12-c: 霓虹招牌稳定 ID 注册（InstancedMesh 按实例索引）
+            for (let i = 0; i < neonCount; i++) {
+                const b = selected[i];
+                const nSid = window._stableId(b.cx, b.cz, 'neon', i);
+                window._entityMap.set(nSid, { instancedMesh: neonSigns, instanceIndex: i, type: 'neon', pos: { x: b.cx, y: b.topY + 0.5, z: b.cz } });
+            }
             neonSigns.renderOrder = 998;
             scene.add(neonSigns);
         }
@@ -3823,7 +3847,16 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
                 buildings: _citySeed + '-B',
                 streetFurniture: _citySeed + '-F'
             };
-            const deltas = {}; // P12-c 各管线填充 Delta
+            // P12-c: 从实例注册表收集所有脏实体 Delta
+            const deltas = {};
+            window._entityMap.forEach((entry, sid) => {
+                const mesh = entry.mesh || (entry.instancedMesh);
+                if (!mesh) return;
+                const ud = mesh.userData || (entry.instancedMesh && entry.instancedMesh.userData);
+                if (ud && ud._dirty) {
+                    deltas[sid] = Object.assign({ _type: entry.type }, ud._delta);
+                }
+            });
             const body = {
                 version: 3, seed: _citySeed, subSeeds,
                 params: {
@@ -3877,7 +3910,27 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         if (p.weather) { WEATHER.current = p.weather.current; WEATHER.target = p.weather.target; WEATHER.progress = p.weather.progress; WEATHER.cycleTimer = p.weather.cycleTimer; }
         if (p.season) { SEASON.seasonality = p.season.seasonality; SEASON.lerpedSeasonality = p.season.seasonality; SEASON.name = p.season.name; }
         if (p.player) { player.x = p.player.x; player.y = p.player.y; player.z = p.player.z; player.yaw = p.player.yaw; player.pitch = p.player.pitch; }
-        // P12-c 待实现：遍历 d.deltas 按 stableId 匹配实例覆盖状态
+        // P12-c: 按 stableId 遍历 Delta，匹配实例覆盖运行时状态
+        if (d.deltas) {
+            Object.entries(d.deltas).forEach(([sid, delta]) => {
+                const entry = window._entityMap.get(sid);
+                if (!entry) return;
+                if (entry.type === 'neon' && entry.instancedMesh && delta.color !== undefined) {
+                    // 霓虹招牌：恢复实例颜色
+                    entry.instancedMesh.setColorAt(entry.instanceIndex, new THREE.Color(delta.color));
+                    if (entry.instancedMesh.instanceColor) entry.instancedMesh.instanceColor.needsUpdate = true;
+                } else if (entry.mesh) {
+                    // 建筑/路灯/树木：恢复位置、颜色等
+                    if (delta.pos) entry.mesh.position.set(delta.pos[0], delta.pos[1], delta.pos[2]);
+                    if (delta.scale && entry.mesh.scale) entry.mesh.scale.set(delta.scale[0], delta.scale[1], delta.scale[2]);
+                    // 标记为脏以便下次 saveGame 继续保留 Delta
+                    entry.mesh.userData._dirty = true;
+                    entry.mesh.userData._delta = delta;
+                }
+                // 路灯点光源恢复
+                if (entry.pt && delta.lightIntensity !== undefined) entry.pt.intensity = delta.lightIntensity;
+            });
+        }
     }
 
     // ---- 构建世界（P1+P2+P3+P4+P5: 地形 + 路网 + 地块 + 建筑 + 立面/家具/雾） ----
@@ -4177,7 +4230,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.7 P12-b | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.7 P12-c | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4274,7 +4327,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
     }, 12000);
 
     init();
-    console.log('星渊城 v15.7 P12-b 混合存档 v2 加载完成');
+    console.log('星渊城 v15.7 P12-c 稳定ID+Delta导出 加载完成');
     // ====== MODULE: Water + Reflection + Atmosphere ======
     // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     const WATER = {
