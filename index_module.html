@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.5 · P25B 霓虹招牌+GTA V双层辉光 (2026-07-27)</title>
+    <title>星渊城 v15.6 · P25D 窗格发光+Interior Mapping (2026-07-28)</title>
     <script>
     (function(){
         try {
@@ -41,14 +41,14 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.5</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v15.6</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.5 · P25B 霓虹招牌+GTA V双层辉光
+    // 星渊城 v15.6 · P25D 窗格发光+Interior Mapping
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -4109,7 +4109,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.6 P25C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.6 P25D | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4206,7 +4206,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
     }, 12000);
 
     init();
-    console.log('星渊城 v15.6 P25C 窗格发光 加载完成');
+    console.log('星渊城 v15.6 P25D 窗格发光+Interior Mapping 加载完成');
     // ====== MODULE: Water + Reflection + Atmosphere ======
     // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     const WATER = {
