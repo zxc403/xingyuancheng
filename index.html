@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.5 · P25B 霓虹招牌+GTA V双层辉光 (2026-07-27)</title>
+    <title>星渊城 v15.8 · P20C 光照氛围自适应 (2026-07-28)</title>
     <script>
     (function(){
         try {
@@ -41,14 +41,14 @@
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.5</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v15.8</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.5 · P25B 霓虹招牌+GTA V双层辉光
+    // 星渊城 v15.8 · P20C 光照氛围自适应
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -62,7 +62,7 @@
     // P17: 内饰映射系统
     // P20B: 降水粒子升级（Rain 50K LineSegments + Snow 30K InstancedMesh Billboard + Splash 500 ring pool）
     // P25A: 夜景动态光照（Moon Light / Bloom日夜联动 / 双曲线式环境光过渡）
-    // P25B: 霓虹招牌（Canvas中文纹理 / GTA V双层Billboard辉光 / 赛博朋克色板）
+    // P20C: 光照氛围自适应（天空色/方向光/闪电闪白/云量）
     // ============================================================
 
     import * as THREE from 'three';
@@ -248,6 +248,17 @@
                     d
                 )
             );
+            // ===== P20C-I: 天气 uniform 推送 =====
+            sd.material.uniforms.uWeatherDarken.value = w.skyDarken;
+            sd.material.uniforms.uWeatherHue.value.copy(
+                new THREE.Color().lerpColors(
+                    new THREE.Color(1.0, 1.0, 1.0),
+                    new THREE.Color(0.72, 0.78, 0.88),
+                    w.skyDarken
+                )
+            );
+            // P20C-IV: 云底高度 — 雨天/阴天云层压低
+            sd.material.uniforms.uCloudHeight.value = 6.0 - w.rainIntensity * 5.0 - w.skyDarken * 2.0;
         }
 
         // 太阳 DirectionalLight：天气削弱
@@ -255,7 +266,11 @@
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
             updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
-            updateLightColor(sun, 0xfff0d0, 0x445577, d);
+            // P20C-II: 阴天方向光偏冷白
+            const overcastSun = new THREE.Color(0xfff0d0).lerp(new THREE.Color(0xc8d8f0), w.skyDarken);
+            updateLightColor(sun, overcastSun.getHex(), 0x445577, d);
+            // P20C-II: 阴影半径天气联动 — 阴天软阴影
+            sun.shadow.radius = 4 + w.skyDarken * 8;
         }
 
         // ===== P25A: 双曲线式环境光过渡 + 月光 =====
@@ -534,6 +549,12 @@
         }
     }
 
+    // ===== P20C-III: 全屏闪白状态机 =====
+    const boltSystem = {
+        flash: 0,              // 闪屏强度 (0~1)
+        decay: 8.0,            // 衰减速度
+    };
+
     // ---- 闪电 ----
     let boltLine = null, boltGlow = null, boltLight = null;
     function generateBolt(start, end, displace, branches) {
@@ -599,14 +620,8 @@
         boltLight.position.copy(midPt);
         boltLight.intensity = 80;
 
-        // SkyDome 闪白
-        if (window._skyDome) {
-            const origSun = window._skyDome.material.uniforms.uSunColor.value.getHex();
-            window._skyDome.material.uniforms.uSunColor.value.set(0xffffff);
-            setTimeout(() => {
-                if (window._skyDome) window._skyDome.material.uniforms.uSunColor.value.setHex(origSun);
-            }, 80);
-        }
+        // P20C-III: 全屏闪白 (LightningShader)
+        boltSystem.flash = 1.0;
 
         // 闪电衰减
         const decayStart = performance.now();
@@ -1580,7 +1595,10 @@
                 uTurbidity: { value: 2.5 },
                 uExposure: { value: 1.0 },
                 uGroundColor: { value: new THREE.Color(0.02, 0.01, 0.02) },
-                uCloudCover: { value: 0.5 }
+                uCloudCover: { value: 0.5 },
+                uWeatherDarken: { value: 0.0 },
+                uWeatherHue: { value: new THREE.Color(1.0, 1.0, 1.0) },
+                uCloudHeight: { value: 6.0 }
             },
             // ===== P18 大气散射天空穹顶 =====
             vertexShader: `
@@ -1601,6 +1619,9 @@
                 uniform float uExposure;
                 uniform vec3 uGroundColor;
                 uniform float uCloudCover;
+                uniform float uWeatherDarken;
+                uniform vec3 uWeatherHue;
+                uniform float uCloudHeight;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -1693,7 +1714,8 @@
                     skyColor += (sunCoreColor + sunGlowColor) * uDayness;
 
                     // ===== 云层 =====
-                    vec3 cloudPos = dir * 30.0 + vec3(uTime * 0.04, 0.0, uTime * 0.02);
+                    float cloudDist = 30.0 - uCloudHeight * 3.0;
+                    vec3 cloudPos = dir * max(1.0, cloudDist) + vec3(uTime * 0.04, 0.0, uTime * 0.02);
                     float cloudNoise = fbm(cloudPos);
                     float cloudDensity = smoothstep(0.35, 0.72, cloudNoise) * uDayness * uCloudCover;
                     float cloudSunEdge = pow(max(dot(dir, sunDir), 0.0), 6.0);
@@ -1726,6 +1748,10 @@
                         float groundBlend = exp(y * 12.0);
                         skyColor = mix(uGroundColor, horizonColor * 0.7, groundBlend);
                     }
+
+                    // ===== P20C-I: 天气色调偏移（阴天偏冷灰 + 亮度压暗） =====
+                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.7);
+                    skyColor *= 1.0 - uWeatherDarken * 0.35;
 
                     // ===== HDR 色调映射 =====
                     skyColor = skyColor / (skyColor * uExposure + vec3(1.0));
@@ -1924,6 +1950,21 @@
                 composer.addPass(wetLensPass);
                 window._wetLens = wetLensPass;
             } catch (e) { console.warn('WetLensPass failed, skip', e); }
+
+            // P20C-III: Lightning Full-Screen Flash
+            try {
+                const LightningShader = {
+                    uniforms: {
+                        tDiffuse: { value: null },
+                        uFlash: { value: 0 },
+                    },
+                    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+                    fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uFlash; void main() { vec4 tex = texture2D(tDiffuse, vUv); gl_FragColor = mix(tex, vec4(1.0), uFlash * 0.85); }`,
+                };
+                const lightningPass = new ShaderPass(LightningShader);
+                composer.addPass(lightningPass);
+                window._lightningPass = lightningPass;
+            } catch (e) { console.warn('LightningPass failed, skip', e); }
 
             outputPass = new OutputPass();
             composer.addPass(outputPass);
@@ -4502,6 +4543,13 @@
         updateWater(dt);
         updateAtmosphere(dt);
         updateNeonSystem(dt);
+        // P20C-III: 闪电闪屏衰减
+        if (boltSystem.flash > 0.001) {
+            boltSystem.flash = Math.max(0, boltSystem.flash - dt * boltSystem.decay);
+            if (window._lightningPass) {
+                window._lightningPass.uniforms.uFlash.value = boltSystem.flash;
+            }
+        }
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -4534,7 +4582,7 @@
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.5 P25B | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.8 P20C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4631,7 +4679,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v14.0 P18 体积大气 加载完成');
+    console.log('星渊城 v15.8 P20C 光照氛围自适应 加载完成');
 </script>
 </body></html>
 
