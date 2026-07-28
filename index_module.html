@@ -4163,7 +4163,6 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         createAtmosphere();
     }
 
-    // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     // ---- 玩家移动 ----
     function updatePlayer(dt) {
         if (!gameStarted || gamePaused) return;
@@ -4192,7 +4191,6 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         camera.lookAt(player.pos.x, player.pos.y + player.height * 0.6, player.pos.z);
     }
 
-    // ===== P14: 3D音频系统（程序化合成，零外部文件） =====
     // ---- 输入 ----
     function initInput() {
         window.addEventListener('keydown', e => { keys[e.code] = true; });
