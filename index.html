@@ -1814,17 +1814,6 @@
         scene.add(moonLight);
         window._moonLight = moonLight;
 
-        // 后处理
-        if (isMobile) {
-            try { rebuildMobileBloom(); } catch(e) { composer = null; }
-        } else {
-            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
-                console.warn('EffectComposer init failed', e); composer = null;
-            }
-        }
-
-        clock = new THREE.Clock();
-
         // ---- P20B-III: Wet Lens Shader ----
         const WetLensShader = {
             uniforms: {
@@ -1904,6 +1893,17 @@
                 }
             `,
         };
+
+        // 后处理
+        if (isMobile) {
+            try { rebuildMobileBloom(); } catch(e) { composer = null; }
+        } else {
+            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
+                console.warn('EffectComposer init failed', e); composer = null;
+            }
+        }
+
+        clock = new THREE.Clock();
 
         function rebuildPostPipeline(cfg) {
             if (!renderer || isMobile) { composer = null; return; }
