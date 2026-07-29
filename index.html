@@ -4542,21 +4542,21 @@
         }
 
         if (gameStarted && !gamePaused) {
-            updateSeasons(dt);
-            updateWeather(dt);
-            updateDayNight(dt);
-            updatePlayer(dt);
-            updatePedestrians(dt);
+            try { updateSeasons(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSeasons: '+e.message; return; }
+            try { updateWeather(dt); } catch(e) { document.getElementById('info').textContent='ERR updateWeather: '+e.message; return; }
+            try { updateDayNight(dt); } catch(e) { document.getElementById('info').textContent='ERR updateDayNight: '+e.message; return; }
+            try { updatePlayer(dt); } catch(e) { document.getElementById('info').textContent='ERR updatePlayer: '+e.message; return; }
+            try { updatePedestrians(dt); } catch(e) { document.getElementById('info').textContent='ERR updatePedestrians: '+e.message; return; }
         }
-        updateRainSystem(dt);
-        updateSplashSystem(dt);
-        updateLeafSystem(dt);
-        updateSnowSystem(dt);
-        updateTrees(dt);
-        updateCityAudio(dt);
-        updateWater(dt);
-        updateAtmosphere(dt);
-        updateNeonSystem(dt);
+        try { updateRainSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateRainSystem: '+e.message; return; }
+        try { updateSplashSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSplashSystem: '+e.message; return; }
+        try { updateLeafSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateLeafSystem: '+e.message; return; }
+        try { updateSnowSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSnowSystem: '+e.message; return; }
+        try { updateTrees(dt); } catch(e) { document.getElementById('info').textContent='ERR updateTrees: '+e.message; return; }
+        try { updateCityAudio(dt); } catch(e) { document.getElementById('info').textContent='ERR updateCityAudio: '+e.message; return; }
+        try { updateWater(dt); } catch(e) { document.getElementById('info').textContent='ERR updateWater: '+e.message; return; }
+        try { updateAtmosphere(dt); } catch(e) { document.getElementById('info').textContent='ERR updateAtmosphere: '+e.message; return; }
+        try { updateNeonSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateNeonSystem: '+e.message; return; }
         // P20C-III: 闪电闪屏衰减
         if (boltSystem.flash > 0.001) {
             boltSystem.flash = Math.max(0, boltSystem.flash - dt * boltSystem.decay);
