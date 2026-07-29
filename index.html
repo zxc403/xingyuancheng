@@ -4079,7 +4079,8 @@
                 const d = DAYNIGHT.dayness;
                 const sunDir = window._skyDome ? window._skyDome.material.uniforms.uSunDirection.value : new THREE.Vector3(0.5, 0.8, 0.4);
                 const sunY = sunDir.y;
-                const sunset = 1.0 - smoothstep(-0.15, 0.25, sunY);
+                const t = Math.max(0, Math.min(1, (sunY - (-0.15)) / (0.25 - (-0.15))));
+                const sunset = 1.0 - t * t * (3.0 - 2.0 * t);
 
                 // 白天：微蓝白，日落：暖橙，夜间：深蓝灰
                 const dayFog = new THREE.Color(0.82, 0.84, 0.88);
