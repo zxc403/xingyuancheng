@@ -353,7 +353,7 @@
             fp.material.uniforms.uColor.value.copy(fogFinal).multiplyScalar(0.6);
             fp.material.uniforms.uFogColor.value.copy(fogFinal);
             fp.material.uniforms.uTime && (fp.material.uniforms.uTime.value += dt * (1 + w.rainIntensity * 2));
-            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(w.wind.force * 1.5, w.wind.force * 1.8);
+            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(WEATHER.wind.force * 1.5, WEATHER.wind.force * 1.8);
         }
 
         // Tone mapping
@@ -1418,7 +1418,7 @@
                 tasks.push((async () => {
                     try {
                         const url = `assets/textures/${setName}/${chDef.file}`;
-                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 30000);
+                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 8000);
                         chDef.setFn(t, tex);
                         t.wrapS = t.wrapT = THREE.RepeatWrapping;
                         t.anisotropy = 8;
@@ -1463,7 +1463,7 @@
                 try {
                     const tex = await Promise.race([
                         loader.loadAsync(`assets/hdr/${key}.hdr`),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
                     ]);
                     hdrKeys[key] = tex;
                 } catch(e) { delete hdrKeys[key]; }
