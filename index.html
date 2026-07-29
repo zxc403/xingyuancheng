@@ -4582,15 +4582,30 @@
         }
 
         // P19: 每帧渲染反射贴图（先于主渲染，确保建筑/天空被镜像相机捕获）
-        renderReflection();
+        try { renderReflection(); } catch(e) { console.error('renderReflection fail', e.message); }
 
-        if (composer) composer.render();
-        else if (renderer) renderer.render(scene, camera);
+        try {
+            if (composer) composer.render();
+            else if (renderer) renderer.render(scene, camera);
+        } catch(e) {
+            document.getElementById('info').textContent = 'RENDER ERR: ' + e.message;
+        }
 
-        // 显示 FPS + dayness + 天气
+        try {
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.8 P20C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        const diag = [
+            `${Math.round(1/dt)}fps`,
+            `cam(${camera.position.x.toFixed(1)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(1)})`,
+            `obj:${scene.children.length}`,
+            `rnd:${renderer?1:0}`,
+            `cmp:${composer?1:0}`,
+            `day:${(DAYNIGHT.dayness*100).toFixed(0)}%`,
+            `sky:${window._skyDome?1:0}`,
+            `ter:${window._terrain?1:0}`,
+        ];
+        document.getElementById('info').textContent = `v15.8 P20C | ${diag.join(' | ')} | ${seasInfo} | ${wName}`;
+        } catch(e) { /* info display failure, non-critical */ }
     }
 
     // ---- 启动 ----
