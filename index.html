@@ -377,9 +377,10 @@
 
         // ==== 季节地面色调 ====
         if (window._terrain && window._terrain.material && window._terrain.material.color) {
-            const tc = window._terrain.material.color;
-            if (tc.userData._origTerrainColor === undefined) tc.userData._origTerrainColor = tc.getHex();
-            const orig = new THREE.Color(tc.userData._origTerrainColor);
+            const tm = window._terrain.material;
+            const tc = tm.color;
+            if (tm.userData._origTerrainColor === undefined) tm.userData._origTerrainColor = tc.getHex();
+            const orig = new THREE.Color(tm.userData._origTerrainColor);
             const seasTint = new THREE.Color(SEASON.lerped.groundTint);
             tc.copy(orig).lerp(seasTint, 0.35);
         }
