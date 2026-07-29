@@ -1606,7 +1606,10 @@
                 uCloudCover: { value: 0.5 },
                 uWeatherDarken: { value: 0.0 },
                 uWeatherHue: { value: new THREE.Color(1.0, 1.0, 1.0) },
-                uCloudHeight: { value: 6.0 }
+                uCloudHeight: { value: 6.0 },
+                uSunColor: { value: new THREE.Color(1.0, 0.95, 0.85) },
+                uZenithColor: { value: new THREE.Color(0.15, 0.3, 0.85) },
+                uHorizonColor: { value: new THREE.Color(0.55, 0.7, 1.0) }
             },
             // ===== P18 大气散射天空穹顶 =====
             vertexShader: `
@@ -1630,6 +1633,9 @@
                 uniform float uWeatherDarken;
                 uniform vec3 uWeatherHue;
                 uniform float uCloudHeight;
+                uniform vec3 uSunColor;
+                uniform vec3 uZenithColor;
+                uniform vec3 uHorizonColor;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -1692,10 +1698,10 @@
                     vec3 rayleighScatter = betaR * rayleighOpticalDepth * rayleighPhase(cosViewSun) * vec3(1.0, 0.95, 0.9) * rayleighExt;
                     float mieScatter = mieOpticalDepth * hgPhase(cosViewSun, MIE_G) * 0.06 * mieExt * uTurbidity;
 
-                    // 天顶色随太阳高度变化
+                    // 天顶/地平线色由 JS 端 P20C 动态传入（季节+天气自适应）
                     float sunsetBlend = 1.0 - smoothstep(-0.15, 0.25, sunY);
-                    vec3 zenithColor = mix(vec3(0.15, 0.3, 0.85), vec3(0.25, 0.15, 0.55), sunsetBlend * 0.7);
-                    vec3 horizonColor = mix(vec3(0.55, 0.7, 1.0), vec3(1.0, 0.45, 0.18), sunsetBlend);
+                    vec3 zenithColor = uZenithColor;
+                    vec3 horizonColor = uHorizonColor;
 
                     // 基础天空：高度渐变 + 散射
                     float horizonFade = pow(1.0 - max(viewHeight, 0.0), 0.55);
@@ -1716,9 +1722,9 @@
 
                     // ===== 太阳盘 =====
                     float sunDisk = smoothstep(0.99945, 1.0, cosViewSun);
-                    vec3 sunCoreColor = vec3(1.0, 0.95, 0.85) * sunDisk * 6.0;
+                    vec3 sunCoreColor = uSunColor * sunDisk * 6.0;
                     float sunInnerGlow = pow(cosViewSun + 0.15, 32.0) * 0.6;
-                    vec3 sunGlowColor = vec3(1.0, 0.85, 0.55) * sunInnerGlow;
+                    vec3 sunGlowColor = uSunColor * 0.85 * sunInnerGlow;
                     skyColor += (sunCoreColor + sunGlowColor) * uDayness;
 
                     // ===== 云层 =====
