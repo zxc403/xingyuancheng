@@ -1554,6 +1554,7 @@
 
     // ---- 引擎初始化（完整保留） ----
     function initEngine() {
+        const _t0 = performance.now();
         try {
             var _testCanvas = document.createElement('canvas');
             var _testGL = _testCanvas.getContext('webgl2') || _testCanvas.getContext('webgl') || _testCanvas.getContext('experimental-webgl');
@@ -1592,6 +1593,7 @@
         renderer.toneMappingExposure = 1.15;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
+        console.log('[perf] renderer init', (performance.now() - _t0).toFixed(0), 'ms');
 
         // ===== 自定义天空穹顶着色器 =====
         const skyDomeGeo = new THREE.SphereGeometry(100, 32, 16);
@@ -1780,6 +1782,7 @@
         skyDome.name = 'skyDome';
         scene.add(skyDome);
         window._skyDome = skyDome;
+        console.log('[perf] skyDome created', (performance.now() - _t0).toFixed(0), 'ms');
 
         // ===== IBL (移动端跳过以加快初始化) =====
         if (!isMobile) {
@@ -1792,6 +1795,7 @@
                 pmrem.dispose();
             } catch(e){ console.warn('IBL failed', e); }
         }
+        console.log('[perf] IBL done', (performance.now() - _t0).toFixed(0), 'ms');
 
         // 三点光 + 半球光
         ambient = new THREE.AmbientLight(0x8a7a6a, 0.45);
@@ -1821,6 +1825,7 @@
         moonLight.castShadow = false;
         scene.add(moonLight);
         window._moonLight = moonLight;
+        console.log('[perf] lights done', (performance.now() - _t0).toFixed(0), 'ms');
 
         // ---- P20B-III: Wet Lens Shader ----
         const WetLensShader = {
@@ -1910,6 +1915,7 @@
                 console.warn('EffectComposer init failed', e); composer = null;
             }
         }
+        console.log('[perf] post-processing done', (performance.now() - _t0).toFixed(0), 'ms');
 
         clock = new THREE.Clock();
 
@@ -2006,6 +2012,7 @@
             window.__game.renderer.attach({ scene, camera, renderer, composer, clock, isMobile });
             window.__game.renderer.syncGlobals();
         }
+        console.log('[perf] initEngine total', (performance.now() - _t0).toFixed(0), 'ms');
     }
 
     // ===== Simplex Noise (P1: 地形生成) =====
