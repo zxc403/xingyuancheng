@@ -4533,7 +4533,13 @@
     // ---- 主循环 ----
     function animate() {
         requestAnimationFrame(animate);
+        try {
         const dt = Math.min(clock.getDelta(), 0.05);
+
+        // DIAG: 最先更新 info（确保即使后续崩溃也能看到）
+        if (camera && scene) {
+            document.getElementById('info').textContent = `v15.8 | fps:${Math.round(1/dt)} | cam(${camera.position.x.toFixed(1)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(1)}) | obj:${scene.children.length} | rnd:${renderer?1:0} | sky:${window._skyDome?1:0} | ter:${window._terrain?1:0}`;
+        }
 
         if (gameStarted && !gamePaused) {
             updateSeasons(dt);
@@ -4591,21 +4597,9 @@
             document.getElementById('info').textContent = 'RENDER ERR: ' + e.message;
         }
 
-        try {
-        const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
-        const seasInfo = `${SEASON.name}`;
-        const diag = [
-            `${Math.round(1/dt)}fps`,
-            `cam(${camera.position.x.toFixed(1)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(1)})`,
-            `obj:${scene.children.length}`,
-            `rnd:${renderer?1:0}`,
-            `cmp:${composer?1:0}`,
-            `day:${(DAYNIGHT.dayness*100).toFixed(0)}%`,
-            `sky:${window._skyDome?1:0}`,
-            `ter:${window._terrain?1:0}`,
-        ];
-        document.getElementById('info').textContent = `v15.8 P20C | ${diag.join(' | ')} | ${seasInfo} | ${wName}`;
-        } catch(e) { /* info display failure, non-critical */ }
+        } catch(e) {
+            document.getElementById('info').textContent = 'ANI ERR: ' + e.message;
+        }
     }
 
     // ---- 启动 ----
