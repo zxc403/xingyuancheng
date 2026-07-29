@@ -346,7 +346,7 @@
         fogFinal.lerp(seasFog, 0.25);
         if (scene.fog) scene.fog.color.copy(fogFinal);
         if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015 + w.fogBoost * 0.006;
-        if (scene.fog instanceof THREE.Fog) scene.fog.far = 450 - w.fogBoost * 180;
+        if (scene.fog instanceof THREE.Fog) scene.fog.far = 700 - w.fogBoost * 200;
 
         if (window._fogPlane) {
             const fp = window._fogPlane;
@@ -3421,7 +3421,7 @@
     // 雾层设置
     function setupFog() {
         // 场景全局雾
-        scene.fog = new THREE.Fog(0x8899aa, 120, 450);
+        scene.fog = new THREE.Fog(0x8899aa, 250, 700);
 
         // P20B-III: Ground Fog (height-attenuated + FBM noise + wind drift)
         const fogGeo = new THREE.PlaneGeometry(500, 500);
@@ -4043,8 +4043,8 @@
                 }
             }
             shader.uniforms = shader.uniforms || {};
-            shader.uniforms.uFogNear = { value: 120 };
-            shader.uniforms.uFogFar = { value: 500 };
+            shader.uniforms.uFogNear = { value: 250 };
+            shader.uniforms.uFogFar = { value: 800 };
             shader.uniforms.uFogHeightMin = { value: -20 };
             shader.uniforms.uFogHeightMax = { value: 40 };
             shader.uniforms.uFogColor = { value: new THREE.Color(0.82, 0.84, 0.86) };
