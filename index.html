@@ -379,6 +379,7 @@
         if (window._terrain && window._terrain.material && window._terrain.material.color) {
             const tm = window._terrain.material;
             const tc = tm.color;
+            tm.userData = tm.userData || {};
             if (tm.userData._origTerrainColor === undefined) tm.userData._origTerrainColor = tc.getHex();
             const orig = new THREE.Color(tm.userData._origTerrainColor);
             const seasTint = new THREE.Color(SEASON.lerped.groundTint);
@@ -3584,7 +3585,7 @@
         groundMat.userData = groundMat.userData || {};
         groundMat.userData._baseRoughness = groundMat.roughness;
         groundMat.userData._baseEnvIntensity = groundMat.envMapIntensity || 0;
-        if (groundMat.color) groundMat.userData._baseColor = groundMat.color.getHex();
+        if (groundMat.color) { groundMat.userData._baseColor = groundMat.color.getHex(); groundMat.userData._origTerrainColor = groundMat.color.getHex(); }
         scene.add(terrain);
         window._terrain = terrain;
 
