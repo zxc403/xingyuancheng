@@ -2081,11 +2081,119 @@
         return _canvasToTex(c);
     }
 
+    // --- A3: Brick（砖墙）---
+    function _genBrick() {
+        const c = document.createElement('canvas'); c.width = c.height = _CT_SIZE;
+        const ctx = c.getContext('2d');
+        const baseColor = '#c04040', mortarColor = '#c0c0c0', agedColor = '#8b2020';
+        const hc = 12, vc = 24;
+        const bw = c.width / hc, bh = c.height / vc;
+        const gap = 2;
+        // 灰缝底色
+        ctx.fillStyle = mortarColor; ctx.fillRect(0, 0, c.width, c.height);
+        for (let row = 0; row < vc; row++) {
+            const offsetX = (row % 2 === 1) ? bw / 2 : 0;
+            for (let col = 0; col < hc; col++) {
+                const bx = col * bw + gap + offsetX;
+                const by = row * bh + gap;
+                const bww = bw - 2 * gap, bhh = bh - 2 * gap;
+                // 跳过越界
+                if (bx + bww > c.width || by + bhh > c.height) continue;
+                // 砖块颜色 ±5% + 个别老化暗化
+                let clr = _varyColor(baseColor, 0.05);
+                if (Math.random() < 0.06) clr = agedColor;
+                ctx.fillStyle = clr;
+                ctx.fillRect(bx, by, bww, bhh);
+                // 砖内微噪点
+                ctx.fillStyle = 'rgba(0,0,0,0.03)';
+                ctx.fillRect(bx, by, bww, 1);
+                ctx.fillRect(bx, by + bhh - 1, bww, 1);
+            }
+        }
+        return _canvasToTex(c);
+    }
+
+    // --- A4: Metal（金属板）---
+    function _genMetal() {
+        const c = document.createElement('canvas'); c.width = c.height = _CT_SIZE;
+        const ctx = c.getContext('2d');
+        const baseColor = '#7a8591';
+        ctx.fillStyle = baseColor; ctx.fillRect(0, 0, c.width, c.height);
+        // 水平条纹
+        for (let y = 0; y < c.height; y += 6) {
+            const v = (y / 6) % 2 === 0 ? 6 : -6;
+            ctx.fillStyle = `rgba(${v>0?'255,255,255':'0,0,0'},0.04)`;
+            ctx.fillRect(0, y, c.width, 6);
+        }
+        // 竖向划痕
+        const scratches = 5 + Math.floor(Math.random() * 5);
+        for (let i = 0; i < scratches; i++) {
+            const sx = Math.random() * c.width;
+            const sy = Math.random() * c.height * 0.5;
+            const sh = 40 + Math.random() * 60;
+            ctx.fillStyle = '#606a75';
+            ctx.fillRect(sx, sy, 1, sh);
+        }
+        // 顶部高光渐变
+        const grad = ctx.createLinearGradient(0, 0, 0, 24);
+        grad.addColorStop(0, 'rgba(255,255,255,0.09)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, c.width, 24);
+        return _canvasToTex(c);
+    }
+
+    // --- A5: Plank（木板）---
+    function _genPlank() {
+        const c = document.createElement('canvas'); c.width = c.height = _CT_SIZE;
+        const ctx = c.getContext('2d');
+        const baseColor = '#8b6914', gapColor = '#5a3d0c';
+        ctx.fillStyle = baseColor; ctx.fillRect(0, 0, c.width, c.height);
+        // 竖向木板
+        let cx = 0, plankIdx = 0;
+        const planks = [];
+        while (cx < c.width) {
+            const pw = 30 + Math.random() * 20;
+            planks.push({ x: cx, w: pw });
+            cx += pw + 1;
+            plankIdx++;
+        }
+        // 暗色板缝
+        planks.forEach(p => {
+            ctx.fillStyle = gapColor;
+            ctx.fillRect(p.x, 0, 1, c.height);
+        });
+        // 每块板内木纹渐变
+        planks.forEach(p => {
+            const midX = p.x + p.w / 2;
+            const grad = ctx.createLinearGradient(p.x, 0, p.x + p.w, 0);
+            grad.addColorStop(0, 'rgba(0,0,0,0.06)');
+            grad.addColorStop(0.3, 'rgba(255,255,255,0.03)');
+            grad.addColorStop(0.6, 'rgba(0,0,0,0.02)');
+            grad.addColorStop(1, 'rgba(0,0,0,0.08)');
+            ctx.fillStyle = grad; ctx.fillRect(p.x, 0, p.w, c.height);
+            // 1-2 个木节椭圆
+            const knots = 1 + Math.floor(Math.random() * 2);
+            for (let k = 0; k < knots; k++) {
+                const kx = p.x + p.w * 0.3 + Math.random() * p.w * 0.4;
+                const ky = 20 + Math.random() * (c.height - 40);
+                const krx = 3 + Math.random() * 5, kry = 2 + Math.random() * 3;
+                ctx.fillStyle = gapColor;
+                ctx.beginPath(); ctx.ellipse(kx, ky, krx, kry, 0, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                ctx.beginPath(); ctx.ellipse(kx, ky, krx+1.5, kry+1, 0, 0, Math.PI*2); ctx.fill();
+            }
+        });
+        return _canvasToTex(c);
+    }
+
     // 纹理缓存
     const _CT = {};
     function _getAllCTex() {
         _CT.asphalt = _genAsphalt();
         _CT.windows = _genWindows();
+        _CT.brick   = _genBrick();
+        _CT.metal   = _genMetal();
+        _CT.plank   = _genPlank();
         return _CT;
     }
 
@@ -2100,8 +2208,8 @@
 
         // 纹理名 → Canvas 纹理 key 映射
         const set2ct = {
-            asphalt:   'asphalt',  concrete:  null,   brick:     null,
-            metal:     null,       plank:     null,    rocky:     null,
+            asphalt:   'asphalt',  concrete:  null,   brick:     'brick',
+            metal:     'metal',    plank:     'plank', rocky:     null,
             forest:    null,       iron:      null,    paving:    'asphalt',
         };
 
@@ -3517,6 +3625,8 @@ vec4 imRayBox(vec2 entry, vec2 rayDir, vec2 roomHalf, float roomDepth) {
 `;
 
     const WL_VERT = `
+varying vec3 wlWorldPos;
+varying vec3 wlNormal;
 vec4 wl_wp = modelMatrix * vec4(position, 1.0);
 wlWorldPos = wl_wp.xyz;
 wlNormal = normalize(mat3(modelMatrix) * normal);
