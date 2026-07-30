@@ -6,7 +6,15 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.7 · P12-c 稳定ID+Delta导出 (2026-07-28)</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+    <title>星渊城 v15.8 · P20C 光照氛围适配 (2026-07-28)</title>
     <script>
     (function(){
         try {
@@ -38,17 +46,57 @@
         #blocker div { text-align:center; color:#fff; font-size:18px; }
         #blocker span { display:block; margin-top:8px; font-size:14px; color:#aaa; }
         #info { position:fixed; top:10px; right:10px; z-index:200; font:11px monospace; color:#0f0; background:rgba(0,0,0,.7); padding:4px 8px; border-radius:4px; pointer-events:none; }
+        /* ===== P12-d: 多槽位存档面板 ===== */
+        #savePanel { position:fixed; top:46px; right:10px; z-index:190; width:220px; background:rgba(10,14,20,.93); border:1px solid rgba(0,255,0,.15); border-radius:6px; padding:8px 10px; font:11px 'Courier New',monospace; color:#0f0; backdrop-filter:blur(6px); transition:transform .3s,opacity .3s; pointer-events:auto; }
+        #savePanel.collapsed { transform:translateX(calc(100% + 20px)); opacity:0; pointer-events:none; }
+        #saveToggle { position:absolute; left:-22px; top:8px; width:20px; height:20px; background:rgba(10,14,20,.9); border:1px solid rgba(0,255,0,.2); border-right:none; border-radius:4px 0 0 4px; color:#0f0; font:10px monospace; cursor:pointer; text-align:center; line-height:18px; transition:background .2s; }
+        #saveToggle:hover { background:rgba(0,255,0,.12); }
+        #savePanel h3 { font-size:12px; color:#ffd700; margin:0 0 8px 12px; letter-spacing:2px; cursor:default; }
+        .save-slot { background:rgba(0,20,10,.35); border:1px solid rgba(0,255,0,.1); border-radius:4px; padding:6px 8px; margin-bottom:5px; transition:border-color .3s,background .3s; cursor:default; }
+        .save-slot:hover { border-color:rgba(0,255,0,.25); background:rgba(0,30,15,.45); }
+        .save-slot.populated { border-color:rgba(0,255,0,.2); }
+        .save-slot.populated:hover { border-color:rgba(0,255,0,.4); }
+        .save-slot.corrupted { border-color:rgba(255,60,60,.35); background:rgba(30,0,0,.25); }
+        .save-slot.corrupted:hover { border-color:rgba(255,60,60,.55); }
+        .slot-label { font-size:10px; color:#ffd700; letter-spacing:1px; margin-bottom:2px; }
+        .slot-time { font-size:10px; color:#6a8; }
+        .slot-version { font-size:9px; color:#587; margin-bottom:4px; }
+        .slot-empty { font-size:10px; color:#345; font-style:italic; }
+        .slot-actions { margin-top:4px; display:flex; gap:4px; }
+        .slot-actions button { flex:1; padding:2px 6px; font:9px 'Courier New',monospace; border:1px solid; border-radius:3px; cursor:pointer; transition:all .2s; }
+        .slot-btn-load { background:rgba(0,255,0,.08); border-color:rgba(0,255,0,.2); color:#0c0; }
+        .slot-btn-load:hover { background:rgba(0,255,0,.2); color:#0f0; border-color:#0f0; }
+        .slot-btn-del { background:rgba(255,50,50,.06); border-color:rgba(255,50,50,.15); color:#c44; }
+        .slot-btn-del:hover { background:rgba(255,50,50,.18); color:#f55; border-color:#f55; }
+        .slot-btn-load:disabled,.slot-btn-del:disabled { opacity:.25; cursor:not-allowed; }
+        #savePanelFooter { display:flex; gap:4px; margin-top:8px; }
+        #saveBtn { flex:1; padding:4px 8px; font:10px 'Courier New',monospace; background:rgba(255,215,0,.1); border:1px solid rgba(255,215,0,.3); color:#ffd700; border-radius:4px; cursor:pointer; letter-spacing:1px; transition:all .2s; }
+        #saveBtn:hover { background:rgba(255,215,0,.22); border-color:#ffd700; text-shadow:0 0 8px rgba(255,215,0,.5); }
+        #saveBtn:active { background:rgba(255,215,0,.35); transform:scale(.96); }
+        #autoTag { font-size:8px; color:#345; margin-left:4px; }
+        .save-toast { position:fixed; top:10px; left:50%; transform:translateX(-50%); background:rgba(0,20,10,.95); border:1px solid #0f0; color:#0f0; padding:6px 18px; border-radius:4px; font:12px monospace; z-index:300; animation:toastFade 1.8s forwards; pointer-events:none; }
+        .save-toast.err { border-color:#f55; color:#f55; }
+        @keyframes toastFade { 0%{opacity:0;transform:translateX(-50%) translateY(-8px)} 20%{opacity:1;transform:translateX(-50%) translateY(0)} 80%{opacity:1} 100%{opacity:0} }
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.7</h1><p id="loadText">P12-c 稳定ID注册中...</p></div>
+    <div id="loading"><h1>星渊城 v15.8</h1><p id="loadText">P20C 光照氛围适配就绪...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
+    <!-- P12-d: 多槽位存档面板 -->
+    <div id="savePanel" class="collapsed">
+        <button id="saveToggle" title="存档面板">&lt;</button>
+        <h3>SAVE SLOTS</h3>
+        <div class="save-slot" data-slot="0"><div class="slot-label">[SLOT 1]</div><div class="slot-empty">— EMPTY —</div></div>
+        <div class="save-slot" data-slot="1"><div class="slot-label">[SLOT 2]</div><div class="slot-empty">— EMPTY —</div></div>
+        <div class="save-slot" data-slot="2"><div class="slot-label">[SLOT 3]</div><div class="slot-empty">— EMPTY —</div></div>
+        <div id="savePanelFooter"><button id="saveBtn">[ SAVE NOW ]</button><span id="autoTag">AUTO:30s</span></div>
+    </div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.7 · P12-c 稳定ID+Delta导出
+    // 星渊城 v15.8 · P20C 光照氛围适配
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -211,7 +259,13 @@
                 uTurbidity: { value: 2.5 },
                 uExposure: { value: 1.0 },
                 uGroundColor: { value: new THREE.Color(0.02, 0.01, 0.02) },
-                uCloudCover: { value: 0.5 }
+                uCloudCover: { value: 0.5 },
+                uWeatherDarken: { value: 0.0 },
+                uWeatherHue: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+                uCloudHeight: { value: 0.5 },
+                uSunColor: { value: new THREE.Color(1.0, 0.95, 0.8) },
+                uZenithColor: { value: new THREE.Color(0.08, 0.08, 0.18) },
+                uHorizonColor: { value: new THREE.Color(0.3, 0.15, 0.05) }
             },
             // ===== P18 大气散射天空穹顶 =====
             vertexShader: `
@@ -232,6 +286,9 @@
                 uniform float uExposure;
                 uniform vec3 uGroundColor;
                 uniform float uCloudCover;
+                uniform float uWeatherDarken;
+                uniform vec3 uWeatherHue;
+                uniform float uCloudHeight;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -358,12 +415,16 @@
                         skyColor = mix(uGroundColor, horizonColor * 0.7, groundBlend);
                     }
 
+                    // ===== P20C-I: 天气氛围暗化 + 色调偏移 =====
+                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.5);
+                    skyColor *= (1.0 - uWeatherDarken * 0.35);
+
                     // ===== HDR 色调映射 =====
                     skyColor = skyColor / (skyColor * uExposure + vec3(1.0));
                     skyColor = pow(skyColor, vec3(1.0/2.2));
                     gl_FragColor = vec4(skyColor, 1.0);
                 }
-            `
+            `,
             side: THREE.BackSide,
             depthWrite: false
         });
@@ -411,16 +472,47 @@
         scene.add(moonLight);
         window._moonLight = moonLight;
 
-        // 后处理
-        if (isMobile) {
-            try { rebuildMobileBloom(); } catch(e) { composer = null; }
-        } else {
-            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
-                console.warn('EffectComposer init failed', e); composer = null;
-            }
-        }
+        // ---- P20C-III: Lightning Flash Shader ----
+        const LightningShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                uFlashIntensity: { value: 0.0 },
+                uResolution: { value: new THREE.Vector2() }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec2 vUv;
+                uniform sampler2D tDiffuse;
+                uniform float uFlashIntensity;
+                uniform vec2 uResolution;
 
-        clock = new THREE.Clock();
+                float hash(vec2 p) {
+                    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+                }
+
+                void main() {
+                    vec4 color = texture2D(tDiffuse, vUv);
+                    float f = clamp(uFlashIntensity, 0.0, 1.0);
+
+                    if (f > 0.001) {
+                        // 闪白核心：向白色混合
+                        color.rgb = mix(color.rgb, vec3(1.0), f * 0.85);
+
+                        // 中心更亮，边缘略暗（模拟拍照过曝）
+                        float centerBoost = 1.0 - smoothstep(0.1, 0.8, length(vUv - 0.5));
+                        color.rgb = mix(color.rgb, vec3(1.0), centerBoost * f * 0.35);
+                    }
+
+                    gl_FragColor = color;
+                }
+            `,
+        };
 
         // ---- P20B-III: Wet Lens Shader ----
         const WetLensShader = {
@@ -502,6 +594,17 @@
             `,
         };
 
+        // 后处理
+        if (isMobile) {
+            try { rebuildMobileBloom(); } catch(e) { composer = null; }
+        } else {
+            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
+                console.warn('EffectComposer init failed', e); composer = null;
+            }
+        }
+
+        clock = new THREE.Clock();
+
         function rebuildPostPipeline(cfg) {
             if (!renderer || isMobile) { composer = null; return; }
             if (!cfg.post) { composer = null; return; }
@@ -555,6 +658,17 @@
                 composer.addPass(wetLensPass);
                 window._wetLens = wetLensPass;
             } catch (e) { console.warn('WetLensPass failed, skip', e); }
+
+            // P20C-III: Lightning Flash
+            try {
+                let lightningPass = new ShaderPass(LightningShader);
+                lightningPass.uniforms.uResolution.value = new THREE.Vector2(
+                    window.innerWidth * renderer.getPixelRatio(),
+                    window.innerHeight * renderer.getPixelRatio()
+                );
+                composer.addPass(lightningPass);
+                window._lightning = lightningPass;
+            } catch (e) { console.warn('LightningPass failed, skip', e); }
 
             outputPass = new OutputPass();
             composer.addPass(outputPass);
@@ -631,6 +745,21 @@
             sd.material.uniforms.uDayness.value = d;
             sd.material.uniforms.uSunDirection.value.copy(sunDir);
             sd.material.uniforms.uCloudCover.value = w.cloudCover;
+
+            // ===== P20C-I: 天气暗度 + 色调偏移 =====
+            sd.material.uniforms.uWeatherDarken.value = w.skyDarken;
+
+            // 色调：阴天/暴风雨偏冷灰蓝，沙尘暴偏橙黄（当前无沙尘暴，预置）
+            const stormHue = new THREE.Color(0x8899bb);
+            const overcastHue = new THREE.Color(0xc0c8d4);
+            const neutralHue = new THREE.Color(1.0, 1.0, 1.0);
+            let weatherHue = neutralHue.clone();
+            if (w.lightningFreq > 0.5) weatherHue = stormHue;
+            else if (w.cloudCover > 0.7) weatherHue.lerp(overcastHue, (w.cloudCover - 0.7) / 0.3);
+            sd.material.uniforms.uWeatherHue.value.set(weatherHue.r, weatherHue.g, weatherHue.b);
+
+            // ===== P20C-IV: 云底高度动态 =====
+            sd.material.uniforms.uCloudHeight.value = 0.55 - w.skyDarken * 0.3;
             const sunsetWarm = 1 - Math.max(0, (d - 0.15) / 0.2);
             sd.material.uniforms.uSunColor.value.copy(
                 new THREE.Color(1.0, 0.95 - sunsetWarm * 0.3, 0.8 - sunsetWarm * 0.5)
@@ -681,8 +810,31 @@
         if (window._sun) {
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
-            updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
-            updateLightColor(sun, 0xfff0d0, 0x445577, d);
+
+            // ===== P20C-II: 方向光调制 =====
+            let dayColor = 0xfff0d0; // 默认暖黄
+            let dayScale = 3.0 * lightAtten;
+
+            // 阴天 (>0.7)：冷白散射色
+            if (w.cloudCover > 0.7) {
+                const overcastT = Math.min((w.cloudCover - 0.7) / 0.3, 1.0);
+                const warm = new THREE.Color(0xfff0d0);
+                const cold = new THREE.Color(0xd0d8e8);
+                const mixColor = warm.clone().lerp(cold, overcastT);
+                dayColor = mixColor.getHex();
+            }
+            // 暴风雨：额外衰减到 0.05~0.15
+            if (w.lightningFreq > 0.3) {
+                const stormT = Math.min((w.lightningFreq - 0.3) / 0.7, 1.0);
+                dayScale *= 1.0 - stormT * 0.85; // 最多衰减到 ~0.15
+            }
+            updateLightIntensity(sun, 3.0, dayScale, 0.12, d);
+            updateLightColor(sun, dayColor, 0x445577, d);
+
+            // 阴天阴影更柔（半影增加）
+            if (sun.shadow && sun.shadow.radius !== undefined) {
+                sun.shadow.radius = 4 + w.skyDarken * 8; // Clear:4, Storm:12
+            }
         }
 
         // ===== P25A: 双曲线式环境光过渡 + 月光 =====
@@ -757,7 +909,7 @@
             fp.material.uniforms.uColor.value.copy(fogFinal).multiplyScalar(0.6);
             fp.material.uniforms.uFogColor.value.copy(fogFinal);
             fp.material.uniforms.uTime && (fp.material.uniforms.uTime.value += dt * (1 + w.rainIntensity * 2));
-            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(w.wind.force * 1.5, w.wind.force * 1.8);
+            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(WEATHER.wind.force.x * 1.5, WEATHER.wind.force.y * 1.8);
         }
 
         // Tone mapping
@@ -782,8 +934,9 @@
         // ==== 季节地面色调 ====
         if (window._terrain && window._terrain.material && window._terrain.material.color) {
             const tc = window._terrain.material.color;
-            if (tc.userData._origTerrainColor === undefined) tc.userData._origTerrainColor = tc.getHex();
-            const orig = new THREE.Color(tc.userData._origTerrainColor);
+            const tm = window._terrain.material;
+            if (tm.userData._origTerrainColor === undefined) tm.userData._origTerrainColor = tc.getHex();
+            const orig = new THREE.Color(tm.userData._origTerrainColor);
             const seasTint = new THREE.Color(SEASON.lerped.groundTint);
             tc.copy(orig).lerp(seasTint, 0.35);
         }
@@ -861,6 +1014,30 @@
         cycleIdx: 0,
         cycleOrder: ['Clear','Overcast','Drizzle','Rain','HeavyRain','Thunderstorm','HeavyRain','Rain','Drizzle','Overcast']
     };
+
+    // ===== P20C-III: 闪白状态（ShaderPass 驱动，几何闪电复用已有系统） =====
+    const boltSystem = { activeFlash: 0, flashPeak: 0, subFlashCount: 0, subFlashTimer: 0 };
+
+    function updateBoltAndFlash(dt) {
+        // 衰减闪白
+        if (boltSystem.activeFlash > 0.001) {
+            boltSystem.activeFlash *= Math.exp(-dt * 8.0);
+            if (boltSystem.activeFlash < 0.001) boltSystem.activeFlash = 0;
+        }
+        // 二次连闪处理
+        if (boltSystem.subFlashCount > 0 && boltSystem.activeFlash < 0.05) {
+            boltSystem.subFlashTimer += dt;
+            if (boltSystem.subFlashTimer > 0.06 + Math.random() * 0.1) {
+                boltSystem.activeFlash = boltSystem.flashPeak * (0.3 + Math.random() * 0.3);
+                boltSystem.subFlashTimer = 0;
+                boltSystem.subFlashCount--;
+            }
+        }
+        // 更新 ShaderPass
+        if (window._lightning) {
+            window._lightning.uniforms.uFlashIntensity.value = boltSystem.activeFlash;
+        }
+    }
 
     // ===== P13: 季节系统 =====
     const SEASON = {
@@ -1028,14 +1205,11 @@
         boltLight.position.copy(midPt);
         boltLight.intensity = 80;
 
-        // SkyDome 闪白
-        if (window._skyDome) {
-            const origSun = window._skyDome.material.uniforms.uSunColor.value.getHex();
-            window._skyDome.material.uniforms.uSunColor.value.set(0xffffff);
-            setTimeout(() => {
-                if (window._skyDome) window._skyDome.material.uniforms.uSunColor.value.setHex(origSun);
-            }, 80);
-        }
+        // P20C-III: 全屏闪白（ShaderPass）+ 二次连闪
+        boltSystem.activeFlash = 0.7 + Math.random() * 0.3;
+        boltSystem.flashPeak = boltSystem.activeFlash;
+        boltSystem.subFlashCount = Math.random() < 0.4 ? 1 : 0;
+        boltSystem.subFlashTimer = 0;
 
         // 闪电衰减
         const decayStart = performance.now();
@@ -1804,48 +1978,158 @@
         if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
     }
 
-    // ---- PBR 纹理加载 ----
+    // ====== MODULE: Canvas 程序化纹理生成 (Phase A1 + A7) ======
+    const _CT_SIZE = 256;
+
+    // 复用的 Perlin/Simplex 噪点（缩放到像素尺寸）
+    function _noise(x, y) { return Simplex.noise3D(x * 0.015, y * 0.015, 0); }
+
+    function _varyColor(hex, variance) {
+        if (variance === 0) return hex;
+        try {
+            const f = variance * 80;
+            let r = parseInt(hex.slice(1, 3), 16);
+            let g = parseInt(hex.slice(3, 5), 16);
+            let b = parseInt(hex.slice(5, 7), 16);
+            const chg = (Math.random() - 0.5) * f;
+            const clamp = v => Math.round(Math.max(0, Math.min(255, v)));
+            r = clamp(r + chg); g = clamp(g + chg); b = clamp(b + chg);
+            return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+        } catch(_) { return hex; }
+    }
+
+    function _darkenColor(hex, pct) {
+        let r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+        const f = 1 - pct;
+        return `#${Math.floor(r*f).toString(16).padStart(2,'0')}${Math.floor(g*f).toString(16).padStart(2,'0')}${Math.floor(b*f).toString(16).padStart(2,'0')}`;
+    }
+
+    function _canvasToTex(c) {
+        const t = new THREE.CanvasTexture(c);
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 8;
+        return t;
+    }
+
+    // --- A1: Asphalt（道路）---
+    function _genAsphalt() {
+        const c = document.createElement('canvas'); c.width = c.height = _CT_SIZE;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#3a3a3a'; ctx.fillRect(0, 0, _CT_SIZE, _CT_SIZE);
+        // Perlin 噪点层
+        const img = ctx.createImageData(_CT_SIZE, _CT_SIZE);
+        for (let y = 0; y < _CT_SIZE; y++) {
+            for (let x = 0; x < _CT_SIZE; x++) {
+                const n = _noise(x, y); const v = 48 + n * 16;
+                const idx = (y * _CT_SIZE + x) * 4;
+                img.data[idx] = v; img.data[idx+1] = v; img.data[idx+2] = v;
+                img.data[idx+3] = Math.max(0, Math.min(255, 200 + n * 55));
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        // 随机碎石子
+        for (let i = 0; i < 300; i++) {
+            const px = Math.random() * _CT_SIZE, py = Math.random() * _CT_SIZE;
+            const clr = Math.random() < 0.5 ? '#555' : '#222';
+            ctx.fillStyle = clr; ctx.fillRect(px, py, 1 + Math.random() * 2, 1 + Math.random() * 2);
+        }
+        return _canvasToTex(c);
+    }
+
+    // --- A7: Windows（建筑窗户贴图）---
+    function _genWindows() {
+        const c = document.createElement('canvas'); c.width = _CT_SIZE; c.height = _CT_SIZE * 2;
+        const ctx = c.getContext('2d');
+        const hc = 8, vc = 16, ww = c.width / hc, wh = c.height / vc;
+        const wallColor = '#4a4a56', frameColor = '#3a3a44';
+
+        // 底色墙壁
+        ctx.fillStyle = wallColor; ctx.fillRect(0, 0, c.width, c.height);
+
+        for (let i = 0; i < vc; i++) {
+            for (let j = 0; j < hc; j++) {
+                const wx = j * ww + ww * 0.15;
+                const wy = i * wh + wh * 0.1;
+                const winW = ww * 0.7, winH = wh * 0.8;
+                const ft = Math.max(2, winW * 0.06); // frame thickness
+                // 阴影
+                ctx.fillStyle = _darkenColor(wallColor, 0.2);
+                ctx.fillRect(wx + ft/2, wy + ft/2, winW, winH);
+                // 窗框
+                ctx.fillStyle = frameColor;
+                ctx.fillRect(wx, wy, winW, winH);
+                // 玻璃（90%暗窗，10%亮灯）
+                const glassColor = Math.random() < 0.1
+                    ? `rgba(255,${180+Math.random()*75},${40+Math.random()*80},0.7)` // 暖灯
+                    : `rgba(10,15,30,0.85)`; // 暗窗
+                ctx.fillStyle = glassColor;
+                ctx.fillRect(wx + ft, wy + ft, winW - 2*ft, winH - 2*ft);
+                // 反射渐变
+                const gx = wx + ft, gy = wy + ft, gw = winW - 2*ft, gh = winH - 2*ft;
+                const grad = ctx.createLinearGradient(gx, gy, gx + gw, gy + gh);
+                grad.addColorStop(0, 'rgba(255,255,255,0.12)');
+                grad.addColorStop(0.5, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad; ctx.fillRect(gx, gy, gw, gh);
+                // 十字窗棂
+                const ms = Math.max(1, ft * 0.75);
+                ctx.fillStyle = frameColor;
+                ctx.fillRect(gx + gw/2 - ms/2, gy, ms, gh); // 竖
+                ctx.fillRect(gx, gy + gh/2 - ms/2, gw, ms); // 横
+            }
+        }
+        return _canvasToTex(c);
+    }
+
+    // 纹理缓存
+    const _CT = {};
+    function _getAllCTex() {
+        _CT.asphalt = _genAsphalt();
+        _CT.windows = _genWindows();
+        return _CT;
+    }
+
+    // ---- PBR 纹理加载（Canvas 程序化生成版） ----
     async function loadRealTextures() {
         const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron', 'paving'];
         const sets = (window._isMobile) ? ['asphalt', 'plank', 'rocky', 'concrete', 'paving'] : allSets;
-        const chMap = {
-            diff:  { file: 'color.jpg',     setFn: (t,tex)=>{ t.colorSpace=THREE.SRGBColorSpace; tex.map=t; } },
-            nor:   { file: 'normal.jpg',    setFn: (t,tex)=>{ tex.normalMap=t; } },
-            rough: { file: 'roughness.jpg', setFn: (t,tex)=>{ tex.roughnessMap=t; } },
-            ao:    { file: 'ao.jpg',        setFn: (t,tex)=>{ tex.aoMap=t; } }
-        };
-        const chs = ['diff', 'nor', 'rough', 'ao'];
         const out = {};
-        const _withTimeout = (p, ms) => Promise.race([
-            p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
-        ]);
-        const tasks = [];
+
+        // 生成 Canvas 纹理
+        const ctex = _getAllCTex();
+
+        // 纹理名 → Canvas 纹理 key 映射
+        const set2ct = {
+            asphalt:   'asphalt',  concrete:  null,   brick:     null,
+            metal:     null,       plank:     null,    rocky:     null,
+            forest:    null,       iron:      null,    paving:    'asphalt',
+        };
+
+        // 每个 set 的底色（用于 fallback 材质）
+        const fallColors = {
+            asphalt:  '#3a3a3a', concrete: '#b0a89c', brick:  '#c04040',
+            metal:    '#7a8591', plank:    '#8b6914', rocky: '#6b6b6b',
+            forest:   '#4a5a30', iron:     '#556677', paving: '#3a3a3a',
+        };
+
         for (const setName of sets) {
             const tex = { map: null, normalMap: null, roughnessMap: null, aoMap: null };
-            out[setName] = tex;
-            for (const ch of chs) {
-                const chDef = chMap[ch];
-                tasks.push((async () => {
-                    try {
-                        const url = `assets/textures/${setName}/${chDef.file}`;
-                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 30000);
-                        chDef.setFn(t, tex);
-                        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                        t.anisotropy = 8;
-                        t.repeat.set(2, 2);
-                    } catch (e) {
-                        console.warn(`[RealTexture] fallback ${setName}/${ch}`, e && e.message);
-                    }
-                })());
+
+            // map: 优先 Canvas 生成纹理，否则纯色 fallback
+            const srcKey = set2ct[setName];
+            if (srcKey && ctex[srcKey]) {
+                tex.map = ctex[srcKey];
+            } else {
+                tex.map = _mkFallbackTex(fallColors[setName] || '#888888', setName);
             }
+            tex.normalMap   = _mkFallbackTex('#8080ff', setName);
+            tex.roughnessMap = _mkFallbackTex('#cccccc', setName);
+            out[setName] = tex;
         }
-        await Promise.allSettled(tasks);
-        for (const setName of sets) {
-            const tex = out[setName];
-            if (!tex.map) tex.map = _mkFallbackTex('#888888', setName);
-            if (!tex.normalMap) tex.normalMap = _mkFallbackTex('#8080ff', setName);
-            if (!tex.roughnessMap) tex.roughnessMap = _mkFallbackTex('#cccccc', setName);
-        }
+
+        // 额外暴露 windows 纹理供建筑 facade 使用（保持 {map} 结构）
+        if (ctex.windows) out.windows = { map: ctex.windows, normalMap: null, roughnessMap: null, aoMap: null };
+
         return out;
     }
 
@@ -2870,6 +3154,9 @@
                         pole.userData.stableId = lampSid;
                         pole.userData._dirty = false;
                         pole.userData._delta = {};
+
+                        // 点光源 (moved before _entityMap.set to avoid TDZ)
+                        const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
                         window._entityMap.set(lampSid, { mesh: pole, type: 'lamp', pt, pos: { x: ox, y: gh+3, z: oz } });
 
                         const arm = new THREE.Mesh(armGeo, poleMat);
@@ -2880,9 +3167,6 @@
                         const lamp = new THREE.Mesh(lampGeo, lampMat);
                         lamp.position.set(ox + nx*side*1.7, gh+5.8, oz + nz*side*1.7);
                         furnGroup.add(lamp);
-
-                        // 点光源
-                        const pt = new THREE.PointLight(0xffcc88, 8, 18, 1.5);
                         pt.position.copy(lamp.position);
                         furnGroup.add(pt);
                         // P6+P8: 记录路灯以便日夜切换
@@ -3038,8 +3322,9 @@
         const neonCount = Math.min(uniqueBlds.length, 40);
         let neonSigns = null;
 
+        let selected = [];
         if (neonCount > 0) {
-            const selected = uniqueBlds.slice(0, neonCount);
+            selected = uniqueBlds.slice(0, neonCount);
             const signGeo = new THREE.PlaneGeometry(6, 1.5);
             neonSigns = new THREE.InstancedMesh(signGeo, new THREE.MeshBasicMaterial({
                 map: neonTexs[0], transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -3840,94 +4125,162 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         });
     }
 
-    function saveGame() {
+    // ===== P12-d: 存档槽键名 =====
+    function slotKey(idx) { return `sc4like.save.slot-${idx}`; }
+
+    // ===== P12-d: Toast 提示 =====
+    function showToast(msg, isErr) {
+        const t = document.createElement('div');
+        t.className = 'save-toast' + (isErr ? ' err' : '');
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 2000);
+    }
+
+    // ===== P12-d: 格式化时间戳 =====
+    function fmtTime(ts) {
+        const d = new Date(ts);
+        const pad = n => String(n).padStart(2,'0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    // ===== P12-d: 构建存档体（与单槽 saveGame 共用核心逻辑） =====
+    function buildSaveBody() {
+        const subSeeds = { terrain: _citySeed+'-T', buildings: _citySeed+'-B', streetFurniture: _citySeed+'-F' };
+        const deltas = {};
+        window._entityMap.forEach((entry, sid) => {
+            const mesh = entry.mesh || entry.instancedMesh;
+            if (!mesh) return;
+            const ud = mesh.userData || (entry.instancedMesh && entry.instancedMesh.userData);
+            if (ud && ud._dirty) deltas[sid] = Object.assign({ _type: entry.type }, ud._delta);
+        });
+        return {
+            version: 4, seed: _citySeed, subSeeds,
+            params: {
+                daynight: { elapsed: DAYNIGHT.elapsed },
+                weather: { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
+                season: { seasonality: SEASON.seasonality, name: SEASON.name },
+                player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }
+            },
+            deltas, timestamp: Date.now()
+        };
+    }
+
+    function signBody(body) {
+        body.checksum = crc32(JSON.stringify({ version: body.version, seed: body.seed, params: body.params, deltas: body.deltas, timestamp: body.timestamp }));
+        return body;
+    }
+
+    // ===== P12-d: 保存到指定槽位 =====
+    function saveToSlot(slotIdx) {
         try {
-            const subSeeds = {
-                terrain: _citySeed + '-T',
-                buildings: _citySeed + '-B',
-                streetFurniture: _citySeed + '-F'
-            };
-            // P12-c: 从实例注册表收集所有脏实体 Delta
-            const deltas = {};
-            window._entityMap.forEach((entry, sid) => {
-                const mesh = entry.mesh || (entry.instancedMesh);
-                if (!mesh) return;
-                const ud = mesh.userData || (entry.instancedMesh && entry.instancedMesh.userData);
-                if (ud && ud._dirty) {
-                    deltas[sid] = Object.assign({ _type: entry.type }, ud._delta);
-                }
-            });
-            const body = {
-                version: 3, seed: _citySeed, subSeeds,
-                params: {
-                    daynight: { elapsed: DAYNIGHT.elapsed },
-                    weather: { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
-                    season: { seasonality: SEASON.seasonality, name: SEASON.name },
-                    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }
-                },
-                deltas, timestamp: Date.now()
-            };
-            body.checksum = crc32(JSON.stringify({ version: body.version, seed: body.seed, params: body.params, deltas: body.deltas, timestamp: body.timestamp }));
+            const body = signBody(buildSaveBody());
+            localStorage.setItem(slotKey(slotIdx), JSON.stringify(body));
+            // 兼容旧版 v2 key（auto-save 兼容）
             localStorage.setItem('sc4like.save.v2', JSON.stringify(body));
+            renderSaveSlots();
+            showToast(`SLOT ${slotIdx+1} SAVED`);
             return true;
-        } catch(e) { console.warn('[P12-b] 存档失败', e); return false; }
+        } catch(e) { console.warn('[P12-d] 存档失败', e); showToast('SAVE FAILED', true); return false; }
+    }
+
+    function saveGame() { return saveToSlot(0); } // 向后兼容
+
+    // ===== P12-d: 从指定槽位读取（含 CRC 校验） =====
+    function loadFromSlot(slotIdx) {
+        try {
+            const raw = localStorage.getItem(slotKey(slotIdx));
+            if (!raw) return null;
+            const d = JSON.parse(raw);
+            const ck = crc32(JSON.stringify({ version: d.version, seed: d.seed, params: d.params, deltas: d.deltas || {}, timestamp: d.timestamp }));
+            if (ck === d.checksum) return d;
+            console.warn(`[P12-d] SLOT ${slotIdx+1} CRC 校验失败，降级为种子重建`);
+            // 标记槽位为损坏（不清除数据，让用户手动处理）
+            return { _corrupted: true, _slot: slotIdx };
+        } catch(e) { return null; }
     }
 
     function loadSave() {
-        // 优先读取 v2，回退 v1
-        try {
-            const r2 = localStorage.getItem('sc4like.save.v2');
-            if (r2) {
-                const d = JSON.parse(r2);
-                const ck = crc32(JSON.stringify({ version: d.version, seed: d.seed, params: d.params, deltas: d.deltas || {}, timestamp: d.timestamp }));
-                if (ck === d.checksum) return d;
-                console.warn('[P12-b] 存档校验失败，降级为种子重建');
-                return null;
-            }
-        } catch(e) {}
+        // 兼容旧版 v2 key（auto-save 恢复首选 slot 0）
+        const d = loadFromSlot(0);
+        if (d) return d;
+        // 回退 v1
         try {
             const r1 = localStorage.getItem('sc4like.save.v1');
             if (!r1) return null;
             const od = JSON.parse(r1);
-            console.log('[P12-b] 从 v1 旧存档迁移');
-            return {
-                version: 3, seed: od.seed, subSeeds: { terrain: od.seed + '-T', buildings: od.seed + '-B', streetFurniture: od.seed + '-F' },
-                params: {
-                    daynight: od.daynight || { elapsed: DAYNIGHT.elapsed },
-                    weather: od.weather || { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
-                    season: od.season || { seasonality: SEASON.seasonality, name: SEASON.name },
-                    player: od.player || { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }
-                },
-                deltas: {}, timestamp: od.timestamp || Date.now()
-            };
+            console.log('[P12-d] 从 v1 旧存档迁移');
+            return { version:4, seed:od.seed, subSeeds:{ terrain:od.seed+'-T', buildings:od.seed+'-B', streetFurniture:od.seed+'-F' },
+                params:{ daynight:od.daynight||{ elapsed:DAYNIGHT.elapsed }, weather:od.weather||{ current:WEATHER.current, target:WEATHER.target, progress:WEATHER.progress, cycleTimer:WEATHER.cycleTimer },
+                    season:od.season||{ seasonality:SEASON.seasonality, name:SEASON.name }, player:od.player||{ x:player.x, y:player.y, z:player.z, yaw:player.yaw, pitch:player.pitch } },
+                deltas:{}, timestamp:od.timestamp||Date.now() };
         } catch(e) { return null; }
     }
 
+    // ===== P12-d: 删除槽位 =====
+    function deleteSlot(slotIdx) {
+        localStorage.removeItem(slotKey(slotIdx));
+        renderSaveSlots();
+        showToast(`SLOT ${slotIdx+1} DELETED`);
+    }
+
+    // ===== P12-d: 渲染槽位 UI =====
+    function renderSaveSlots() {
+        for (let i = 0; i < 3; i++) {
+            const el = document.querySelector(`.save-slot[data-slot="${i}"]`);
+            if (!el) continue;
+            const d = loadFromSlot(i);
+            el.classList.remove('populated', 'corrupted');
+            if (!d) {
+                el.innerHTML = `<div class="slot-label">[SLOT ${i+1}]</div><div class="slot-empty">— EMPTY —</div>`;
+            } else if (d._corrupted) {
+                el.classList.add('corrupted');
+                el.innerHTML = `<div class="slot-label">[SLOT ${i+1}]</div><div class="slot-time" style="color:#f55">⚠ CRC FAIL — 数据损坏</div><div class="slot-actions"><button class="slot-btn-del" onclick="window._p12d_deleteSlot(${i})">DEL</button></div>`;
+            } else {
+                el.classList.add('populated');
+                const verno = d.version >= 3 ? 'v2' : 'v1';
+                el.innerHTML = `<div class="slot-label">[SLOT ${i+1}]</div><div class="slot-time">${fmtTime(d.timestamp)}</div><div class="slot-version">seed:${d.seed} | fmt:${verno}</div><div class="slot-actions"><button class="slot-btn-load" onclick="window._p12d_loadSlot(${i})">LOAD</button><button class="slot-btn-del" onclick="window._p12d_deleteSlot(${i})">DEL</button></div>`;
+            }
+        }
+    }
+
+    // ===== P12-d: 全局快捷函数 =====
+    window._p12d_loadSlot = function(i) {
+        const d = loadFromSlot(i);
+        if (!d || d._corrupted) { showToast(`SLOT ${i+1} CORRUPTED`, true); return; }
+        if (d.seed !== _citySeed) { showToast(`SEED MISMATCH — 种子不匹配`, true); return; }
+        disposeScene(scene);
+        while(scene.children.length>0) scene.remove(scene.children[0]);
+        window._entityMap.clear();
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.fog = new THREE.FogExp2(0x7a9ab8, 0.0055);
+        buildWorld();
+        restoreState(d);
+        showToast(`SLOT ${i+1} LOADED`);
+    };
+    window._p12d_deleteSlot = function(i) { deleteSlot(i); };
+
     function restoreState(d) {
-        if (!d) return;
+        if (!d || d._corrupted) return;
         const p = d.params;
         if (p.daynight) DAYNIGHT.elapsed = p.daynight.elapsed;
         if (p.weather) { WEATHER.current = p.weather.current; WEATHER.target = p.weather.target; WEATHER.progress = p.weather.progress; WEATHER.cycleTimer = p.weather.cycleTimer; }
         if (p.season) { SEASON.seasonality = p.season.seasonality; SEASON.lerpedSeasonality = p.season.seasonality; SEASON.name = p.season.name; }
         if (p.player) { player.x = p.player.x; player.y = p.player.y; player.z = p.player.z; player.yaw = p.player.yaw; player.pitch = p.player.pitch; }
-        // P12-c: 按 stableId 遍历 Delta，匹配实例覆盖运行时状态
         if (d.deltas) {
             Object.entries(d.deltas).forEach(([sid, delta]) => {
                 const entry = window._entityMap.get(sid);
                 if (!entry) return;
                 if (entry.type === 'neon' && entry.instancedMesh && delta.color !== undefined) {
-                    // 霓虹招牌：恢复实例颜色
                     entry.instancedMesh.setColorAt(entry.instanceIndex, new THREE.Color(delta.color));
                     if (entry.instancedMesh.instanceColor) entry.instancedMesh.instanceColor.needsUpdate = true;
                 } else if (entry.mesh) {
-                    // 建筑/路灯/树木：恢复位置、颜色等
                     if (delta.pos) entry.mesh.position.set(delta.pos[0], delta.pos[1], delta.pos[2]);
                     if (delta.scale && entry.mesh.scale) entry.mesh.scale.set(delta.scale[0], delta.scale[1], delta.scale[2]);
-                    // 标记为脏以便下次 saveGame 继续保留 Delta
                     entry.mesh.userData._dirty = true;
                     entry.mesh.userData._delta = delta;
                 }
-                // 路灯点光源恢复
                 if (entry.pt && delta.lightIntensity !== undefined) entry.pt.intensity = delta.lightIntensity;
             });
         }
@@ -4126,16 +4479,18 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
                 setWeather(next);
                 console.log('[P11B] 天气切换至:', next);
             }
-            // P12: L 键手动存档
+            // P12-d: L 键切换存档面板；Shift+1/2/3 快速存档到指定槽位
             if (e.code === 'KeyL' && !e.repeat) {
-                if (saveGame()) {
-                    console.log('[P12] 已手动存档 seed=' + _citySeed);
-                    const info = document.getElementById('info');
-                    const orig = info.textContent;
-                    info.textContent += ' | 💾 已保存';
-                    setTimeout(() => { if (info.textContent.endsWith('已保存')) info.textContent = orig; }, 1500);
-                }
+                const panel = document.getElementById('savePanel');
+                const isCollapsed = panel.classList.toggle('collapsed');
+                const toggle = document.getElementById('saveToggle');
+                toggle.textContent = isCollapsed ? '<' : '>';
+                if (!isCollapsed) renderSaveSlots();
             }
+            // P12-d: Shift+1/2/3 快速存档
+            if (e.shiftKey && e.code === 'Digit1' && !e.repeat) { saveToSlot(0); }
+            if (e.shiftKey && e.code === 'Digit2' && !e.repeat) { saveToSlot(1); }
+            if (e.shiftKey && e.code === 'Digit3' && !e.repeat) { saveToSlot(2); }
             // P13: J 键切换季节
             if (e.code === 'KeyJ' && !e.repeat) {
                 const offset = SEASON.cycleDays / 4;
@@ -4169,6 +4524,39 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
     }
 
 
+    // ===== P12-d: 存档面板初始化 =====
+    function initSavePanel() {
+        const panel = document.getElementById('savePanel');
+        const toggle = document.getElementById('saveToggle');
+        const saveBtn = document.getElementById('saveBtn');
+
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isCollapsed = panel.classList.toggle('collapsed');
+            toggle.textContent = isCollapsed ? '<' : '>';
+            if (!isCollapsed) renderSaveSlots();
+        });
+
+        saveBtn.addEventListener('click', () => {
+            let target = 0;
+            for (let i = 0; i < 3; i++) {
+                const d = loadFromSlot(i);
+                if (!d || d._corrupted) { target = i; break; }
+            }
+            saveToSlot(target);
+        });
+
+        let collapseTimer;
+        panel.addEventListener('mouseenter', () => { clearTimeout(collapseTimer); });
+        panel.addEventListener('mouseleave', () => {
+            collapseTimer = setTimeout(() => {
+                panel.classList.add('collapsed');
+                toggle.textContent = '<';
+            }, 5000);
+        });
+    }
+    initSavePanel();
+
     // ===== P18: 更新大气系统 =====
     function updateAtmosphere(dt) {
         if (window._atmosphere && window._atmosphere.update) {
@@ -4200,12 +4588,12 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         updateWindowLights(dt);
         updateCamera();
 
-        // P12: 每 30 秒自动存档
+        // P12-d: 每 30 秒自动存档到槽位 0
         if (!window._autoSaveAcc) window._autoSaveAcc = 0;
         window._autoSaveAcc += dt;
         if (window._autoSaveAcc >= 30 && gameStarted) {
             window._autoSaveAcc = 0;
-            saveGame();
+            saveToSlot(0);
         }
 
         if (window._skyDome) window._skyDome.material.uniforms.uTime.value += dt;
@@ -4221,6 +4609,9 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
             wp.uWetness.value = WEATHER.lerped.wetness || 0;
         }
 
+        // P20C-III: Lightning flash decay
+        updateBoltAndFlash(dt);
+
         // P19: 每帧渲染反射贴图（先于主渲染，确保建筑/天空被镜像相机捕获）
         renderReflection();
 
@@ -4230,7 +4621,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         // 显示 FPS + dayness + 天气
         const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
         const seasInfo = `${SEASON.name}`;
-        document.getElementById('info').textContent = `v15.7 P12-c | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
+        document.getElementById('info').textContent = `v15.8 P20C | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4238,7 +4629,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         // P12: 种子化 RNG 初始化
         _citySeed = seedFromURL() || ((Date.now() & 0x7FFFFFFF) >>> 0);
         rng = createMulberry32(_citySeed);
-        console.log(`[P12] 种子: ${_citySeed}` + (seedFromURL() ? ' (来自URL)' : ' (随机生成)'));
+        console.log(`[P12-d] 种子: ${_citySeed}` + (seedFromURL() ? ' (来自URL)' : ' (随机生成)'));
 
         const isMob = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
         if (isMob) {
@@ -4289,7 +4680,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
         const save = loadSave();
         if (save && save.seed === _citySeed) {
             restoreState(save);
-            console.log('[P12] 存档已恢复');
+            console.log('[P12-d] 存档已恢复');
         }
 
         initInput();
@@ -4327,7 +4718,7 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
     }, 12000);
 
     init();
-    console.log('星渊城 v15.7 P12-c 稳定ID+Delta导出 加载完成');
+    console.log('星渊城 v15.8 P20C 光照氛围适配 加载完成');
     // ====== MODULE: Water + Reflection + Atmosphere ======
     // ===== P16: 水体系统 (Gerstner + Schlick Fresnel + 泡沫 + 日夜/季节联动) =====
     const WATER = {
@@ -4567,9 +4958,10 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
                         vec2 refUV = clamp(vReflectUV, 0.001, 0.999);
                         reflectColor = texture2D(uReflectionTex, refUV).rgb;
                     } else {
-                        // 兜底：环境贴图
+                        // 兜底：环境贴图 (equirect → UV)
                         vec3 reflectDir = reflect(-V, N);
-                        reflectColor = textureCube(uEnvMap, reflectDir).rgb;
+                        vec2 envUV = vec2(atan(reflectDir.z, reflectDir.x) * 0.159154943 + 0.5, reflectDir.y * 0.5 + 0.5);
+                        reflectColor = texture2D(uEnvMap, envUV).rgb;
                     }
 
                     // --- 折射色：深水颜色 ---
@@ -4717,7 +5109,9 @@ if (wlNight > 0.003 && abs(wlNormal.y) < 0.65) {
                 const d = DAYNIGHT.dayness;
                 const sunDir = window._skyDome ? window._skyDome.material.uniforms.uSunDirection.value : new THREE.Vector3(0.5, 0.8, 0.4);
                 const sunY = sunDir.y;
-                const sunset = 1.0 - smoothstep(-0.15, 0.25, sunY);
+                // JS 手写 smoothstep：t = clamp((x - e0)/(e1 - e0), 0, 1); return t*t*(3-2*t)
+                const t = Math.max(0, Math.min(1, (sunY + 0.15) / 0.40));
+                const sunset = 1.0 - t * t * (3.0 - 2.0 * t);
 
                 // 白天：微蓝白，日落：暖橙，夜间：深蓝灰
                 const dayFog = new THREE.Color(0.82, 0.84, 0.88);
