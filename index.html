@@ -455,6 +455,7 @@
         WEATHER.current = WEATHER.target;
         WEATHER.target = state;
         WEATHER.progress = 0;
+        WEATHER.cycleTimer = 0;
         if (WEATHER.progress >= 1) {
             for (const k of Object.keys(WEATHER.lerped)) WEATHER.lerped[k] = WEATHER.profiles[WEATHER.current][k];
         }
@@ -3258,7 +3259,7 @@
                 daynight: { elapsed: DAYNIGHT.elapsed },
                 weather: { current: WEATHER.current, target: WEATHER.target, progress: WEATHER.progress, cycleTimer: WEATHER.cycleTimer },
                 season: { seasonality: SEASON.seasonality, name: SEASON.name },
-                player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch },
+                player: { x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw, pitch: player.pitch },
                 timestamp: Date.now()
             };
             localStorage.setItem('sc4like.save.v1', JSON.stringify(data));
@@ -3276,7 +3277,7 @@
         DAYNIGHT.elapsed = d.daynight.elapsed;
         if (d.weather) { WEATHER.current = d.weather.current; WEATHER.target = d.weather.target; WEATHER.progress = d.weather.progress; WEATHER.cycleTimer = d.weather.cycleTimer; }
         if (d.season) { SEASON.seasonality = d.season.seasonality; SEASON.lerpedSeasonality = d.season.seasonality; SEASON.name = d.season.name; }
-        if (d.player) { player.x = d.player.x; player.y = d.player.y; player.z = d.player.z; player.yaw = d.player.yaw; player.pitch = d.player.pitch; }
+        if (d.player) { player.pos.set(d.player.x, d.player.y, d.player.z); player.yaw = d.player.yaw; player.pitch = d.player.pitch; }
     }
 
     // ---- 构建世界（P1+P2+P3+P4+P5: 地形 + 路网 + 地块 + 建筑 + 立面/家具/雾） ----
@@ -4403,6 +4404,126 @@
         // P19: 每帧渲染反射贴图（先于主渲染，确保建筑/天空被镜像相机捕获）
         renderReflection();
 
+        // ==================== 星渊城夜景动画更新 start ====================
+        const _nt = clock.getElapsedTime();
+        if (window._neonSigns) {
+            const { signMeshes } = window._neonSigns;
+            for (const s of signMeshes) {
+                s.mesh.position.y = s.baseY + Math.sin(_nt * 1.5 + s.phase) * 0.08;
+                s.mesh.material.color.setScalar(s.blink ? (0.4 + 0.6 * Math.abs(Math.sin(_nt * 2 + s.phase))) : 1.0);
+            }
+        }
+        if (window._particles) {
+            const { orbs, steams, rainMesh, ripples, rainCount, rainVel } = window._particles;
+            const p = orbs.geometry.attributes.position.array;
+            for (let i = 0; i < 600; i++) {
+                p[i*3] += Math.sin(_nt + i)*0.005;
+                p[i*3+1] += Math.sin(_nt*0.7 + i)*0.008 + 0.003;
+                p[i*3+2] += Math.cos(_nt*0.5 + i)*0.004;
+                if (p[i*3+1] > 55) { p[i*3+1] = -45; p[i*3] = (Math.random()-0.5)*160; p[i*3+2] = -8+Math.random()*50; }
+            }
+            orbs.geometry.attributes.position.needsUpdate = true;
+
+            for (const s of steams) {
+                s.life += dt; s.group.position.y += s.rise * dt; s.group.position.x += Math.sin(_nt + s.group.position.y)*0.03;
+                const k = s.life / s.max;
+                for (const sp of s.group.children) {
+                    sp.material.opacity = Math.max(0, (1-k) * 0.15);
+                    sp.scale.multiplyScalar(1 + dt*0.15);
+                }
+                if (s.life >= s.max) { s.life = 0; s.group.position.set((Math.random()-0.5)*140, -45, (Math.random()-0.5)*60+20); }
+            }
+
+            const rp = rainMesh.geometry.attributes.position.array;
+            for (let i = 0; i < rainCount; i++) {
+                rp[i*3+1] -= rainVel[i]; rp[i*3] += 0.2;
+                if (rp[i*3+1] < -45) {
+                    if (Math.random() < 0.02) window._particles.spawnRipple(rp[i*3], rp[i*3+2]);
+                    rp[i*3+1] = 100; rp[i*3] = (Math.random()-0.5)*180; rp[i*3+2] = (Math.random()-0.5)*120;
+                }
+            }
+            rainMesh.geometry.attributes.position.needsUpdate = true;
+
+            for (let i = ripples.length - 1; i >= 0; i--) {
+                const r = ripples[i]; r.life += dt; const k = r.life / r.max;
+                r.mesh.scale.setScalar(1 + k * 8); r.mesh.material.opacity = 0.6 * (1 - k);
+                if (r.life >= r.max) { window._particles.particleGroup.remove(r.mesh); ripples.splice(i, 1); }
+            }
+        }
+        if (window._holos) {
+            const { holoData, holoAds } = window._holos;
+            for (const h of holoData) {
+                h.group.position.y = h.baseY + Math.sin(_nt + h.phase) * 0.8;
+                if (h.type !== 'geometry') {
+                    const toCam = camera.position.clone().sub(h.group.position); toCam.y = 0;
+                    h.group.lookAt(h.group.position.clone().add(toCam));
+                }
+                if (h.type === 'geometry') {
+                    h.wire.rotation.x += dt * 0.4; h.wire.rotation.y += dt * 0.6;
+                    h.glow.rotation.x -= dt * 0.3; h.glow.rotation.y -= dt * 0.2;
+                    h.rings[0].rotation.z += dt; h.rings[1].rotation.z -= dt * 0.8;
+                    h.glowMat.uniforms.uTime.value = _nt;
+                } else if (h.type === 'text') {
+                    if (_nt - h.lastSwitch > 6) { h.adIdx = (h.adIdx + 1) % holoAds.length; h.lastSwitch = _nt; }
+                    drawTextHolo(h.canvasObj, holoAds[h.adIdx], h.colorHex, _nt);
+                    if (h.mat.uniforms) { h.mat.uniforms.uTime.value = _nt; h.mat.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight); }
+                } else if (h.type === 'data') {
+                    drawDataHolo(h.canvasObj, _nt);
+                    if (h.mat.uniforms) { h.mat.uniforms.uTime.value = _nt; h.mat.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight); }
+                }
+                const cone = h.group.children[h.group.children.length - 2];
+                if (cone && cone.material) cone.material.opacity = 0.04 + 0.03 * Math.sin(_nt * 2 + h.phase);
+            }
+        }
+        // ==================== 星渊城夜景动画更新 end ====================
+
+        // ==================== 交互式全息 UI 动画更新 start ====================
+        if (window._holoUI) {
+            const ui = window._holoUI;
+            const _nt2 = clock.getElapsedTime();
+
+            // 1. 昼夜联动
+            const dayness = (typeof DAYNIGHT !== 'undefined' && DAYNIGHT && typeof DAYNIGHT.dayness === 'number') ? DAYNIGHT.dayness : 0;
+            for (const h of ui.holoData) {
+                if (h.mat && h.mat.uniforms && h.mat.uniforms.uDayness !== undefined) h.mat.uniforms.uDayness.value = dayness;
+                if (h.glowMat && h.glowMat.uniforms && h.glowMat.uniforms.uDayness !== undefined) h.glowMat.uniforms.uDayness.value = dayness;
+            }
+
+            // 2. 准星命中检测
+            const { hitIndex, hitBtn } = ui.raycast();
+            ui.currentHolo = hitIndex;
+            ui.currentButton = hitBtn;
+
+            // 3. uHovered 平滑插值
+            const targetHover = (hitIndex >= 0 && hitBtn >= 0) ? 1.0 : 0.0;
+            ui.hoverCurrent += (targetHover - ui.hoverCurrent) * 0.18;
+            for (const h of ui.holoData) {
+                if (h.mat && h.mat.uniforms && h.mat.uniforms.uHovered !== undefined) {
+                    h.mat.uniforms.uHovered.value = (h.holoIndex === hitIndex) ? ui.hoverCurrent : 0.0;
+                }
+            }
+
+            // 4. 重绘当前命中的屏，按钮跟随 hover 高亮
+            if (hitIndex >= 0) {
+                ui.drawHoloFull(ui.holoData[hitIndex], hitBtn);
+            }
+
+            // 5. 准星与提示
+            if (ui.reticle) ui.reticle.classList.toggle('active', hitIndex >= 0 && hitBtn >= 0);
+            if (ui.hint) {
+                ui.hint.style.opacity = (hitIndex >= 0 && hitBtn >= 0) ? '1' : '0';
+                ui.hint.textContent = (hitIndex >= 0 && hitBtn >= 0) ? '按 E ' + ui.buttons[hitBtn].label : '';
+            }
+
+            // 6. E 键下降沿触发
+            const eDown = (keys['KeyE'] === true);
+            if (!gamePaused && eDown && !ui.prevE && hitIndex >= 0 && hitBtn >= 0) {
+                ui.triggerButton(hitIndex, hitBtn);
+            }
+            ui.prevE = eDown;
+        }
+        // ==================== 交互式全息 UI 动画更新 end ====================
+
         if (composer) composer.render();
         else if (renderer) renderer.render(scene, camera);
 
@@ -4480,6 +4601,712 @@
 
         setTimeout(() => document.getElementById('loading').classList.add('hide'), 800);
         clock.start();
+
+        // ==================== 星渊城夜景模块接入 start ====================
+
+        // ---- 模块 A：霓虹招牌层 ----
+        const neonGroup = new THREE.Group();
+        scene.add(neonGroup);
+
+        const signNames = [
+            '黑市酒吧','神经漫游','赛博诊所','数据深渊','量子当铺','义体工坊',
+            '记忆银行','全息剧场','霓虹食堂','暗网入口','脉冲酒馆','机械佛陀',
+            '明日科技','龙舌兰号','零重力酒吧','虚拟天堂','数据黑市','神经接口'
+        ];
+        const signPalette = [0xff00cc, 0x00f0ff, 0x00ffaa, 0xffaa00, 0xaa66ff, 0x0088ff];
+
+        function makeSignCanvas(text, colorHex, isVertical) {
+            const c = document.createElement('canvas');
+            c.width = isVertical ? 256 : 1024;
+            c.height = isVertical ? 1024 : 256;
+            const x = c.getContext('2d');
+            x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
+            x.textAlign = 'center'; x.textBaseline = 'middle';
+            x.font = isVertical
+                ? 'bold 70px "Microsoft YaHei", sans-serif'
+                : 'bold 90px "Microsoft YaHei", sans-serif';
+            x.fillStyle = colorHex; x.shadowColor = colorHex; x.shadowBlur = 40;
+            x.fillText(text, isVertical ? 256 / 2 : 1024 / 2, isVertical ? 1024 / 2 : 256 / 2);
+            x.strokeStyle = colorHex; x.lineWidth = 2;
+            x.strokeText(text, isVertical ? 256 / 2 : 1024 / 2, isVertical ? 1024 / 2 : 256 / 2);
+            return new THREE.CanvasTexture(c);
+        }
+
+        const signMeshes = [];
+        for (let i = 0; i < 18; i++) {
+            const color = new THREE.Color(signPalette[i % signPalette.length]);
+            const colorHex = '#' + color.getHexString();
+            const isVertical = Math.random() < 0.25;
+            const w = isVertical ? 3 + Math.random() * 2 : 6 + Math.random() * 6;
+            const h = isVertical ? w * 3 : 2.5 + Math.random() * 2;
+            const tex = makeSignCanvas(signNames[i % signNames.length], colorHex, isVertical);
+            tex.minFilter = THREE.LinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            const mat = new THREE.MeshBasicMaterial({
+                map: tex, transparent: true, side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+            mesh.position.set(
+                (Math.random() - 0.5) * 140,
+                -35 + Math.random() * 80,
+                1 + Math.random()
+            );
+            const frame = new THREE.Mesh(
+                new THREE.BoxGeometry(w + 0.6, h + 0.6, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.3 })
+            );
+            frame.position.z = -0.2;
+            mesh.add(frame);
+            neonGroup.add(mesh);
+            signMeshes.push({
+                mesh, colorHex, baseY: mesh.position.y,
+                phase: Math.random() * Math.PI * 2, blink: Math.random() < 0.3,
+                tex, canvasObj: null
+            });
+        }
+
+        // ---- 模块 B：粒子 + 蒸汽 + 雨 + 涟漪 ----
+        const particleGroup = new THREE.Group();
+        scene.add(particleGroup);
+
+        // orbs
+        const orbCount = 600;
+        const orbGeo = new THREE.BufferGeometry();
+        const orbPos = new Float32Array(orbCount * 3);
+        const orbCol = new Float32Array(orbCount * 3);
+        const orbPhase = new Float32Array(orbCount);
+        for (let i = 0; i < orbCount; i++) {
+            orbPos[i * 3] = (Math.random() - 0.5) * 160;
+            orbPos[i * 3 + 1] = -45 + Math.random() * 120;
+            orbPos[i * 3 + 2] = -8 + Math.random() * 50;
+            const c = new THREE.Color(signPalette[Math.floor(Math.random() * signPalette.length)]);
+            orbCol[i * 3] = c.r; orbCol[i * 3 + 1] = c.g; orbCol[i * 3 + 2] = c.b;
+            orbPhase[i] = Math.random() * Math.PI * 2;
+        }
+        orbGeo.setAttribute('position', new THREE.BufferAttribute(orbPos, 3));
+        orbGeo.setAttribute('color', new THREE.BufferAttribute(orbCol, 3));
+        const orbs = new THREE.Points(orbGeo, new THREE.PointsMaterial({
+            size: 0.25, vertexColors: true, transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending, sizeAttenuation: true, depthWrite: false
+        }));
+        particleGroup.add(orbs);
+
+        // 蒸汽
+        const steamTex = (() => {
+            const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+            const x = c.getContext('2d');
+            const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+            g.addColorStop(0, 'rgba(220,230,255,0.35)');
+            g.addColorStop(0.5, 'rgba(180,200,240,0.15)');
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+            const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+        })();
+        const steams = [];
+        for (let i = 0; i < 20; i++) {
+            const group = new THREE.Group();
+            const n = 3 + Math.floor(Math.random() * 4);
+            for (let j = 0; j < n; j++) {
+                const m = new THREE.SpriteMaterial({
+                    map: steamTex, color: 0xddeeff, transparent: true,
+                    opacity: 0.1, depthWrite: false
+                });
+                const s = new THREE.Sprite(m);
+                s.scale.set(3 + Math.random() * 3, 3 + Math.random() * 3, 1);
+                s.position.set((Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2);
+                group.add(s);
+            }
+            group.position.set((Math.random() - 0.5) * 140, -45, (Math.random() - 0.5) * 60 + 20);
+            particleGroup.add(group);
+            steams.push({
+                group, life: Math.random() * 5,
+                max: 5 + Math.random() * 5, rise: 0.6 + Math.random() * 0.8
+            });
+        }
+
+        // 雨
+        const rainCount = 1200;
+        const rainGeo = new THREE.BufferGeometry();
+        const rainPos = new Float32Array(rainCount * 3);
+        const rainVel = new Float32Array(rainCount);
+        for (let i = 0; i < rainCount; i++) {
+            rainPos[i * 3] = (Math.random() - 0.5) * 180;
+            rainPos[i * 3 + 1] = Math.random() * 100;
+            rainPos[i * 3 + 2] = (Math.random() - 0.5) * 120;
+            rainVel[i] = 0.8 + Math.random() * 0.4;
+        }
+        rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+        const rainMesh = new THREE.Points(rainGeo, new THREE.PointsMaterial({
+            color: 0x99bbdd, size: 0.08, transparent: true, opacity: 0.35, depthWrite: false
+        }));
+        particleGroup.add(rainMesh);
+
+        // 涟漪池
+        const ripples = [];
+        const rippleGeo = new THREE.RingGeometry(0.1, 0.15, 24);
+        function spawnRipple(x, z) {
+            const m = new THREE.MeshBasicMaterial({
+                color: 0xaaddff, transparent: true, opacity: 0.6,
+                side: THREE.DoubleSide, depthWrite: false
+            });
+            const r = new THREE.Mesh(rippleGeo, m);
+            r.rotation.x = -Math.PI / 2;
+            r.position.set(x, -45, z);
+            r.scale.setScalar(0.1);
+            particleGroup.add(r);
+            ripples.push({ mesh: r, life: 0, max: 0.4 + Math.random() * 0.3 });
+        }
+
+        // ---- 模块 C：全息屏层 ----
+        const holoGroup = new THREE.Group();
+        scene.add(holoGroup);
+
+        const holoShaderMat = (baseColor) => new THREE.ShaderMaterial({
+            uniforms: {
+                uMap: { value: null },
+                uTime: { value: 0 },
+                uColor: { value: baseColor },
+                uScanHeight: { value: 0.08 },
+                uOpacity: { value: 0.85 },
+                uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+            },
+            vertexShader: `
+                varying vec2 vUv; varying vec3 vNormal; varying vec3 vViewDir;
+                void main(){
+                    vUv = uv;
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vNormal = normalize(mat3(modelMatrix) * normal);
+                    vViewDir = normalize(cameraPosition - worldPos.xyz);
+                    gl_Position = projectionMatrix * viewMatrix * worldPos;
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uMap; uniform float uTime; uniform vec3 uColor;
+                uniform float uScanHeight; uniform float uOpacity; uniform vec2 uResolution;
+                varying vec2 vUv; varying vec3 vNormal; varying vec3 vViewDir;
+                float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+                void main(){
+                    vec4 tex = texture2D(uMap, vUv);
+                    vec3 base = tex.rgb * uColor * 1.4;
+                    float fres = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewDir))), 1.8);
+                    vec3 edge = uColor * fres * 1.8;
+                    float scanPos = mod(gl_FragCoord.y - uTime * 120.0, uResolution.y);
+                    float scan = smoothstep(0.0, uScanHeight * uResolution.y, scanPos)
+                               * smoothstep(uScanHeight * uResolution.y, 0.0, scanPos);
+                    scan = scan * 0.5 + 0.5;
+                    float lines = 0.9 + 0.1 * sin(gl_FragCoord.y * 1.2 + uTime * 6.0);
+                    float glitch = step(0.995, hash(vec2(floor(vUv.y * 40.0), floor(uTime * 8.0)))) * 0.4;
+                    float flicker = 0.92 + 0.08 * sin(uTime * 23.0 + hash(vUv) * 20.0);
+                    vec3 col = base * scan * lines * flicker + edge;
+                    col += glitch * vec3(1.0);
+                    float a = (tex.a + fres * 0.6) * uOpacity * flicker;
+                    gl_FragColor = vec4(col, a);
+                }
+            `,
+            transparent: true, side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending, depthWrite: false
+        });
+
+        const holoGeoShaderMat = (baseColor) => new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 }, uColor: { value: baseColor },
+                uOpacity: { value: 0.6 }
+            },
+            vertexShader: `
+                varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPos;
+                void main(){
+                    vec4 wp = modelMatrix * vec4(position, 1.0);
+                    vPos = wp.xyz;
+                    vNormal = normalize(mat3(modelMatrix) * normal);
+                    vViewDir = normalize(cameraPosition - wp.xyz);
+                    gl_Position = projectionMatrix * viewMatrix * wp;
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime; uniform vec3 uColor; uniform float uOpacity;
+                varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPos;
+                void main(){
+                    float fres = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewDir))), 2.0);
+                    float pulse = 0.5 + 0.5 * sin(uTime * 2.0 + length(vPos) * 0.5);
+                    vec3 col = uColor * (fres * 1.5 + pulse * 0.3);
+                    gl_FragColor = vec4(col, fres * uOpacity);
+                }
+            `,
+            transparent: true, side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending, depthWrite: false
+        });
+
+        function mkCanvas(w, h) {
+            const c = document.createElement('canvas'); c.width = w; c.height = h;
+            return { c, x: c.getContext('2d'), tex: new THREE.CanvasTexture(c) };
+        }
+
+        function drawTextHolo(o, text, colorHex, t) {
+            const x = o.x, w = o.c.width, h = o.c.height;
+            x.fillStyle = 'rgba(0,0,0,0.15)'; x.fillRect(0, 0, w, h);
+            x.textAlign = 'center'; x.textBaseline = 'middle';
+            x.font = 'bold 110px "Microsoft YaHei", sans-serif';
+            x.fillStyle = colorHex; x.shadowColor = colorHex; x.shadowBlur = 50;
+            x.fillText(text, w / 2, h / 2);
+            x.strokeStyle = colorHex; x.lineWidth = 2;
+            x.strokeText(text, w / 2, h / 2);
+            x.shadowBlur = 0; x.strokeStyle = colorHex;
+            x.globalAlpha = 0.4; x.lineWidth = 1;
+            for (let i = 0; i < 6; i++) {
+                const yy = 60 + i * 70;
+                x.beginPath(); x.moveTo(60, yy); x.lineTo(180, yy); x.stroke();
+                x.beginPath(); x.moveTo(w - 180, yy); x.lineTo(w - 60, yy); x.stroke();
+            }
+            x.globalAlpha = 1;
+            if (Math.random() < 0.04) {
+                x.fillStyle = 'rgba(255,255,255,0.25)';
+                x.fillRect(0, Math.random() * h, w, 2 + Math.random() * 15);
+            }
+            o.tex.needsUpdate = true;
+        }
+
+        function drawDataHolo(o, t) {
+            const x = o.x, w = o.c.width, h = o.c.height;
+            x.fillStyle = 'rgba(0,0,0,0.12)'; x.fillRect(0, 0, w, h);
+            x.font = '22px "Courier New", monospace'; x.textAlign = 'left';
+            for (let i = 0; i < 30; i++) {
+                const xx = Math.random() * w, yy = (t * 80 + i * 34) % h;
+                const ch = String.fromCharCode(0x30A0 + Math.floor(Math.random() * 96));
+                const ch2 = String.fromCharCode(0xFF00 + Math.floor(Math.random() * 95));
+                x.fillStyle = o.color; x.shadowColor = o.color; x.shadowBlur = 10;
+                x.fillText(Math.random() < 0.4 ? ch2 : ch, xx, yy);
+            }
+            o.tex.needsUpdate = true;
+        }
+
+        const holoData = [];
+        const holoTypes = ['text', 'text', 'data', 'geometry', 'text', 'geometry'];
+        const holoAds = [
+            '明日科技·义体升级', 'NEURAL LINK 3.0', '神经接口·即插即用',
+            '数据黑市·24h', '龙舌兰号·今夜启航', '零重力酒吧',
+            '量子当铺·典当未来', '赛博诊所·无证行医', 'AI教会·拯救灵魂',
+            '义体工坊·七折', '液态阳光·5信用点', '虚拟天堂'
+        ];
+        for (let i = 0; i < 6; i++) {
+            const color = new THREE.Color(signPalette[i % signPalette.length]);
+            const colorHex = '#' + color.getHexString();
+            const group = new THREE.Group();
+            const type = holoTypes[i];
+            let w = 12, h = 5;
+            if (type === 'data') { w = 5; h = 12; }
+            if (type === 'geometry') { w = 7; h = 7; }
+
+            let mesh, mat, canvasObj;
+            if (type === 'geometry') {
+                const dodecGeo = new THREE.DodecahedronGeometry(3, 0);
+                const edges = new THREE.EdgesGeometry(dodecGeo);
+                const wire = new THREE.LineSegments(edges,
+                    new THREE.LineBasicMaterial({
+                        color, transparent: true, opacity: 0.9,
+                        blending: THREE.AdditiveBlending, depthWrite: false
+                    }));
+                group.add(wire);
+                const glow = new THREE.Mesh(
+                    new THREE.IcosahedronGeometry(3.3, 1),
+                    holoGeoShaderMat(color)
+                );
+                group.add(glow);
+                const ring = new THREE.Mesh(
+                    new THREE.TorusGeometry(4.2, 0.04, 8, 80),
+                    new THREE.MeshBasicMaterial({
+                        color, transparent: true, opacity: 0.6,
+                        blending: THREE.AdditiveBlending, depthWrite: false
+                    }));
+                ring.rotation.x = Math.PI / 4; group.add(ring);
+                const ring2 = ring.clone();
+                ring2.rotation.x = -Math.PI / 3; ring2.rotation.y = Math.PI / 5;
+                group.add(ring2);
+                holoData.push({
+                    group, type, wire, glow, glowMat: glow.material,
+                    rings: [ring, ring2], color, colorHex,
+                    baseY: 0, phase: Math.random() * Math.PI * 2
+                });
+            } else {
+                canvasObj = type === 'data'
+                    ? mkCanvas(256, 1024)
+                    : mkCanvas(1024, 512);
+                canvasObj.color = colorHex;
+                mat = holoShaderMat(color);
+                mat.uniforms.uMap.value = canvasObj.tex;
+                mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+                group.add(mesh);
+                const edge = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, 0.2));
+                const edgeMat = new THREE.LineBasicMaterial({
+                    color, transparent: true, opacity: 0.7,
+                    blending: THREE.AdditiveBlending, depthWrite: false
+                });
+                group.add(new THREE.LineSegments(edge, edgeMat));
+                const cornerGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+                const cornerMat = new THREE.MeshBasicMaterial({
+                    color, transparent: true, opacity: 0.9
+                });
+                [[-w/2, h/2], [w/2, h/2], [-w/2, -h/2], [w/2, -h/2]].forEach(([cx, cy]) => {
+                    const k = new THREE.Mesh(cornerGeo, cornerMat);
+                    k.position.set(cx, cy, 0.1); group.add(k);
+                });
+                holoData.push({
+                    group, type, mesh, mat, canvasObj,
+                    color, colorHex, edgeMat, w, h,
+                    baseY: 0, phase: Math.random() * Math.PI * 2,
+                    adIdx: i % holoAds.length, lastSwitch: 0
+                });
+            }
+
+            // 投影光束
+            const coneH = 25;
+            const cone = new THREE.Mesh(
+                new THREE.ConeGeometry(w * 0.55, coneH, 32, 1, true),
+                new THREE.MeshBasicMaterial({
+                    color, transparent: true, opacity: 0.05,
+                    side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false
+                })
+            );
+            cone.position.y = -coneH / 2 - h / 2 + 0.5;
+            group.add(cone);
+            const baseGlow = new THREE.Mesh(
+                new THREE.SphereGeometry(0.25, 12, 12),
+                new THREE.MeshBasicMaterial({ color })
+            );
+            baseGlow.position.y = -h / 2 - coneH - 1;
+            group.add(baseGlow);
+
+            // 主城坐标适配：建筑墙面 z≈0~2
+            const ang = (i / 6) * Math.PI * 0.8 - Math.PI * 0.4;
+            const r = 35 + Math.random() * 25;
+            group.position.set(
+                Math.sin(ang) * r * 1.3,
+                10 + Math.random() * 30,
+                Math.cos(ang) * r * 0.6 + 2
+            );
+            holoData[i].baseY = group.position.y;
+            holoGroup.add(group);
+        }
+
+        // 模块引用（供 animate 更新用）
+        window._neonSigns = { signMeshes };
+        window._particles = { orbs, steams, rainMesh, ripples, rainCount, rainVel, particleGroup, spawnRipple };
+        window._holos = { holoData, holoAds };
+        // ==================== 星渊城夜景模块接入 end ====================
+
+        // ==================== 交互式全息 UI 模块接入 start ====================
+
+        // 1. 屏幕中心准星
+        const holoReticleStyle = document.createElement('style');
+        holoReticleStyle.textContent = `
+            #holo-reticle {
+                position: fixed; top: 50%; left: 50%; width: 16px; height: 16px;
+                transform: translate(-50%, -50%); pointer-events: none; z-index: 1000;
+                transition: opacity 0.15s, transform 0.15s;
+            }
+            #holo-reticle::before, #holo-reticle::after {
+                content: ''; position: absolute; background: rgba(0, 240, 255, 0.85);
+                box-shadow: 0 0 6px #00f0ff;
+            }
+            #holo-reticle::before { top: 7px; left: 0; width: 16px; height: 2px; }
+            #holo-reticle::after { top: 0; left: 7px; width: 2px; height: 16px; }
+            #holo-reticle.active {
+                transform: translate(-50%, -50%) scale(1.6);
+                filter: drop-shadow(0 0 10px #ff00cc);
+            }
+            #holo-reticle.active::before, #holo-reticle.active::after {
+                background: #ff00cc; box-shadow: 0 0 10px #ff00cc;
+            }
+            #holo-hint {
+                position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+                color: #00f0ff; font-family: 'Microsoft YaHei', sans-serif; font-size: 13px;
+                text-shadow: 0 0 8px #00f0ff; pointer-events: none; opacity: 0;
+                transition: opacity 0.15s; z-index: 1000; white-space: nowrap;
+            }
+        `;
+        document.head.appendChild(holoReticleStyle);
+        const holoReticle = document.createElement('div');
+        holoReticle.id = 'holo-reticle';
+        document.body.appendChild(holoReticle);
+        const holoHint = document.createElement('div');
+        holoHint.id = 'holo-hint';
+        document.body.appendChild(holoHint);
+        window._holoUI.reticle = holoReticle;
+        window._holoUI.hint = holoHint;
+
+        // 2. 全息 UI 状态
+        const holoRaycaster = new THREE.Raycaster();
+        window._holoUI = {
+            prevE: false,
+            hoverCurrent: 0,
+            currentHolo: -1,
+            currentButton: -1,
+            holoData: window._holos.holoData,
+            buttons: [
+                { id: 'ads', label: '切换广告' },
+                { id: 'teleport', label: '传送' },
+                { id: 'weather', label: '切换天气' }
+            ]
+        };
+
+        // 3. 按钮区域（Canvas 像素坐标，根据屏类型不同布局）
+        function getHoloButtonRects(holo, w, h) {
+            const buttons = [];
+            if (holo.type === 'data') {
+                buttons.push(
+                    { id: 'ads', rect: [w * 0.55, 100, w * 0.38, 180] },
+                    { id: 'teleport', rect: [w * 0.55, 340, w * 0.38, 180] }
+                );
+                if (holo.holoIndex === 0) buttons.push({ id: 'weather', rect: [w * 0.55, 580, w * 0.38, 180] });
+            } else {
+                const bw = (w - 80) / 3;
+                buttons.push(
+                    { id: 'ads', rect: [20, h - 100, bw, 75] },
+                    { id: 'teleport', rect: [40 + bw, h - 100, bw, 75] }
+                );
+                if (holo.holoIndex === 0) buttons.push({ id: 'weather', rect: [60 + bw * 2, h - 100, bw, 75] });
+            }
+            return buttons;
+        }
+
+        // 4. 扩展 shader：加入 uHovered 与 uDayness
+        const holoUIVertexShader = `
+            varying vec2 vUv; varying vec3 vNormal; varying vec3 vViewDir;
+            void main(){
+                vUv = uv;
+                vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                vNormal = normalize(mat3(modelMatrix) * normal);
+                vViewDir = normalize(cameraPosition - worldPos.xyz);
+                gl_Position = projectionMatrix * viewMatrix * worldPos;
+            }
+        `;
+        const holoUIFragmentShader = `
+            uniform sampler2D uMap; uniform float uTime; uniform vec3 uColor;
+            uniform float uScanHeight; uniform float uOpacity; uniform vec2 uResolution;
+            uniform float uHovered; uniform float uDayness;
+            varying vec2 vUv; varying vec3 vNormal; varying vec3 vViewDir;
+            float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+            void main(){
+                vec4 tex = texture2D(uMap, vUv);
+                vec3 base = tex.rgb * uColor * 1.4;
+                float fres = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewDir))), 1.8);
+                vec3 edge = uColor * fres * (1.8 + uHovered * 2.5);
+                float scanPos = mod(gl_FragCoord.y - uTime * 120.0, uResolution.y);
+                float scan = smoothstep(0.0, uScanHeight * uResolution.y, scanPos)
+                           * smoothstep(uScanHeight * uResolution.y, 0.0, scanPos);
+                scan = scan * 0.5 + 0.5;
+                float lines = 0.9 + 0.1 * sin(gl_FragCoord.y * 1.2 + uTime * 6.0);
+                float glitch = step(0.995, hash(vec2(floor(vUv.y * 40.0), floor(uTime * 8.0)))) * 0.4;
+                float flicker = 0.92 + 0.08 * sin(uTime * 23.0 + hash(vUv) * 20.0);
+                vec3 col = base * scan * lines * flicker + edge;
+                col += glitch * vec3(1.0);
+                col += vec3(uHovered * 0.35);
+                float a = (tex.a + fres * 0.6) * uOpacity * flicker;
+                float dayAtten = 1.0 - uDayness * 0.85;
+                gl_FragColor = vec4(col * dayAtten, a * dayAtten + uHovered * 0.12);
+            }
+        `;
+        const holoGeoUIVertexShader = `
+            varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPos;
+            void main(){
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vPos = wp.xyz;
+                vNormal = normalize(mat3(modelMatrix) * normal);
+                vViewDir = normalize(cameraPosition - wp.xyz);
+                gl_Position = projectionMatrix * viewMatrix * wp;
+            }
+        `;
+        const holoGeoUIFragmentShader = `
+            uniform float uTime; uniform vec3 uColor; uniform float uOpacity;
+            uniform float uDayness;
+            varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPos;
+            void main(){
+                float fres = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewDir))), 2.0);
+                float pulse = 0.5 + 0.5 * sin(uTime * 2.0 + length(vPos) * 0.5);
+                vec3 col = uColor * (fres * 1.5 + pulse * 0.3);
+                float dayAtten = 1.0 - uDayness * 0.85;
+                gl_FragColor = vec4(col * dayAtten, fres * uOpacity * dayAtten);
+            }
+        `;
+
+        // 5. 替换已有材质为带 uHovered/uDayness 的新 ShaderMaterial
+        for (let i = 0; i < window._holoUI.holoData.length; i++) {
+            const h = window._holoUI.holoData[i];
+            h.holoIndex = i;
+            if (h.type === 'text' || h.type === 'data') {
+                const oldMap = h.mat && h.mat.uniforms && h.mat.uniforms.uMap
+                    ? h.mat.uniforms.uMap.value : h.canvasObj.tex;
+                const oldColor = h.mat && h.mat.uniforms && h.mat.uniforms.uColor
+                    ? h.mat.uniforms.uColor.value : new THREE.Color(h.color);
+                const newMat = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uMap: { value: oldMap },
+                        uTime: { value: 0 },
+                        uColor: { value: oldColor },
+                        uScanHeight: { value: 0.08 },
+                        uOpacity: { value: 0.85 },
+                        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                        uHovered: { value: 0.0 },
+                        uDayness: { value: 0.0 }
+                    },
+                    vertexShader: holoUIVertexShader,
+                    fragmentShader: holoUIFragmentShader,
+                    transparent: true, side: THREE.DoubleSide,
+                    blending: THREE.AdditiveBlending, depthWrite: false
+                });
+                h.mesh.material = newMat;
+                h.mat = newMat;
+            } else if (h.type === 'geometry') {
+                const newMat = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uColor: { value: h.glowMat.uniforms.uColor.value },
+                        uOpacity: { value: 0.6 },
+                        uDayness: { value: 0.0 }
+                    },
+                    vertexShader: holoGeoUIVertexShader,
+                    fragmentShader: holoGeoUIFragmentShader,
+                    transparent: true, side: THREE.DoubleSide,
+                    blending: THREE.AdditiveBlending, depthWrite: false
+                });
+                h.glow.material = newMat;
+                h.glowMat = newMat;
+            }
+        }
+
+        // 6. 全息屏内容 + 按钮统一绘制
+        window._holoUI.drawHoloFull = function(holo, hoveredBtn) {
+            const { x, c } = holo.canvasObj;
+            const w = c.width, h = c.height;
+            x.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            x.fillRect(0, 0, w, h);
+
+            if (holo.type === 'text') {
+                const text = window._holos.holoAds[holo.adIdx];
+                x.textAlign = 'center'; x.textBaseline = 'middle';
+                x.font = 'bold 110px "Microsoft YaHei", sans-serif';
+                x.fillStyle = holo.colorHex; x.shadowColor = holo.colorHex; x.shadowBlur = 50;
+                x.fillText(text, w / 2, h / 2 - 45);
+                x.strokeStyle = holo.colorHex; x.lineWidth = 2;
+                x.strokeText(text, w / 2, h / 2 - 45);
+            } else if (holo.type === 'data') {
+                x.font = '22px "Courier New", monospace'; x.textAlign = 'left';
+                const _t = clock.getElapsedTime();
+                for (let i = 0; i < 30; i++) {
+                    const xx = Math.random() * w;
+                    const yy = (_t * 80 + i * 34) % h;
+                    const ch = String.fromCharCode(0x30A0 + Math.floor(Math.random() * 96));
+                    const ch2 = String.fromCharCode(0xFF00 + Math.floor(Math.random() * 95));
+                    x.fillStyle = holo.colorHex; x.shadowColor = holo.colorHex; x.shadowBlur = 10;
+                    x.fillText(Math.random() < 0.4 ? ch2 : ch, xx, yy);
+                }
+            }
+
+            const buttons = getHoloButtonRects(holo, w, h);
+            x.textAlign = 'center'; x.textBaseline = 'middle';
+            for (let i = 0; i < buttons.length; i++) {
+                const [bx, by, bw, bh] = buttons[i].rect;
+                const isHover = (i === hoveredBtn);
+
+                x.fillStyle = isHover ? 'rgba(0, 240, 255, 0.35)' : 'rgba(0, 240, 255, 0.12)';
+                x.shadowColor = isHover ? '#00f0ff' : 'transparent';
+                x.shadowBlur = isHover ? 22 : 0;
+                x.beginPath();
+                if (typeof x.roundRect === 'function') {
+                    x.roundRect(bx, by, bw, bh, 8);
+                } else {
+                    x.rect(bx, by, bw, bh);
+                }
+                x.fill();
+
+                x.strokeStyle = isHover ? '#ffffff' : 'rgba(0, 240, 255, 0.55)';
+                x.lineWidth = isHover ? 2 : 1;
+                x.stroke();
+
+                x.fillStyle = '#ffffff';
+                x.font = isHover ? 'bold 22px "Microsoft YaHei", sans-serif' : '20px "Microsoft YaHei", sans-serif';
+                x.shadowColor = '#00f0ff'; x.shadowBlur = 10;
+                x.fillText(buttons[i].label, bx + bw / 2, by + bh / 2);
+            }
+            x.shadowBlur = 0;
+            holo.canvasObj.tex.needsUpdate = true;
+        };
+
+        // 7. 命中检测
+        window._holoUI.raycast = function() {
+            let hitIndex = -1, hitBtn = -1, hitUv = null;
+            if (!isPointerLocked || !gameStarted) return { hitIndex, hitBtn, hitUv };
+
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            holoRaycaster.set(camera.position, direction);
+
+            const targets = [];
+            const holoData = window._holoUI.holoData;
+            for (let i = 0; i < holoData.length; i++) {
+                const hd = holoData[i];
+                if (hd.type !== 'geometry' && hd.mesh && camera.position.distanceTo(hd.group.position) <= 15) {
+                    targets.push({ mesh: hd.mesh, index: i });
+                }
+            }
+            if (targets.length === 0) return { hitIndex, hitBtn, hitUv };
+
+            const intersects = holoRaycaster.intersectObjects(targets.map(t => t.mesh));
+            if (intersects.length > 0) {
+                const found = targets.find(t => t.mesh === intersects[0].object);
+                if (!found) return { hitIndex, hitBtn, hitUv };
+                const idx = found.index;
+                const holo = holoData[idx];
+                const uv = intersects[0].uv;
+                const _w = holo.canvasObj.c.width, _h = holo.canvasObj.c.height;
+                const cx = uv.x * _w;
+                const cy = (1.0 - uv.y) * _h;
+                const buttons = getHoloButtonRects(holo, _w, _h);
+                for (let j = 0; j < buttons.length; j++) {
+                    const [bx, by, bw, bh] = buttons[j].rect;
+                    if (cx >= bx && cx <= bx + bw && cy >= by && cy <= by + bh) {
+                        hitBtn = j; break;
+                    }
+                }
+                hitIndex = idx; hitUv = uv;
+            }
+            return { hitIndex, hitBtn, hitUv };
+        };
+
+        // 8. 按钮动作
+        window._holoUI.triggerButton = function(holoIndex, btnIndex) {
+            const holo = window._holoUI.holoData[holoIndex];
+            const btn = window._holoUI.buttons[btnIndex];
+            if (!btn) return;
+
+            if (btn.id === 'ads') {
+                holo.adIdx = (holo.adIdx + 1) % window._holos.holoAds.length;
+                holo.lastSwitch = clock.getElapsedTime();
+                window._holoUI.drawHoloFull(holo, -1);
+            } else if (btn.id === 'teleport') {
+                const forward = new THREE.Vector3();
+                holo.group.getWorldDirection(forward);
+                const target = holo.group.position.clone().sub(forward.multiplyScalar(5));
+                const groundY = getTerrainH(target.x, target.z);
+                player.pos.set(target.x, groundY + 1.7, target.z);
+                camera.position.set(target.x, groundY + 3.4, target.z);
+            } else if (btn.id === 'weather') {
+                if (typeof setWeather === 'function') {
+                    const currentW = WEATHER.target;
+                    const list = WEATHER.states.filter(w => w !== currentW);
+                    const next = list[Math.floor(Math.random() * list.length)] || WEATHER.states[0];
+                    setWeather(next);
+                }
+            }
+        };
+
+        // 9. 初始绘制一次所有屏
+        for (const h of window._holoUI.holoData) {
+            window._holoUI.drawHoloFull(h, -1);
+        }
+
+        // ==================== 交互式全息 UI 模块接入 end ====================
+
         animate();
     }
 
