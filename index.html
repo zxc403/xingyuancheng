@@ -6,15 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>星渊城 v15.8 · P20C 光照氛围自适应 (2026-07-28)</title>
-    <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-    </script>
+    <title>星渊城 v15.9 · 六项光照修复 (2026-07-31)</title>
     <script>
     (function(){
         try {
@@ -46,17 +38,22 @@
         #blocker div { text-align:center; color:#fff; font-size:18px; }
         #blocker span { display:block; margin-top:8px; font-size:14px; color:#aaa; }
         #info { position:fixed; top:10px; right:10px; z-index:200; font:11px monospace; color:#0f0; background:rgba(0,0,0,.7); padding:4px 8px; border-radius:4px; pointer-events:none; }
+        /* P21: 手机虚拟摇杆 */
+        #joyArea { position:fixed; bottom:40px; left:30px; z-index:300; width:140px; height:140px; border-radius:50%; background:rgba(255,255,255,.08); border:2px solid rgba(255,255,255,.15); touch-action:none; display:none; }
+        #joyKnob { position:absolute; top:50%; left:50%; width:54px; height:54px; border-radius:50%; background:rgba(255,255,255,.22); border:2px solid rgba(255,255,255,.3); transform:translate(-50%,-50%); pointer-events:none; }
+        @media (max-width:1024px) { #joyArea { display:block; } }
     </style>
 </head>
 <body>
-    <div id="loading"><h1>星渊城 v15.8</h1><p id="loadText">初始化引擎...</p></div>
+    <div id="loading"><h1>星渊城 v16.0</h1><p id="loadText">初始化引擎...</p></div>
     <div id="webglFail">WebGL 不可用，请检查浏览器硬件加速设置。</div>
     <div id="blocker"><div>点击开始<div><span>WASD移动 | 鼠标转动视角 | 滚轮缩放</span></div></div></div>
     <div id="info"></div>
+    <div id="joyArea"><div id="joyKnob"></div></div>
 
 <script type="module">
     // ============================================================
-    // 星渊城 v15.8 · P20C 光照氛围自适应
+    // 星渊城 v15.4 · P20C 光照氛围适配
     // 管线：ECS、PBR纹理、HDR、SkyDome、IBL、Bloom+SSAO+Film+ACES
     // P1-P5: 地形、路网、地块、建筑、家具/雾
     // P10: 行人系统（InstancedMesh, Idle/Walk 状态机, 沿 sidewalk 行走）
@@ -69,8 +66,6 @@
     // P20A: 天气-水体耦合（风暴调暗 + 雨天反射/泡沫增强 + 闪电同步）
     // P17: 内饰映射系统
     // P20B: 降水粒子升级（Rain 50K LineSegments + Snow 30K InstancedMesh Billboard + Splash 500 ring pool）
-    // P25A: 夜景动态光照（Moon Light / Bloom日夜联动 / 双曲线式环境光过渡）
-    // P20C: 光照氛围自适应（天空色/方向光/闪电闪白/云量）
     // ============================================================
 
     import * as THREE from 'three';
@@ -174,7 +169,6 @@
         targetSpeed: 1.0,               // 时间倍速（1=正常）
     };
     window._bldMeshes = [];              // 建筑网格引用 {mesh, nightEmissive}
-    window._bldData = [];               // P25B: 建筑位置数据 {cx, cz, topY, w, d, dist}
     window._lampLights = [];             // 路灯 PointLight 引用
     window._glassStripes = [];           // CBD 玻璃幕墙引用 {mesh, baseEmissiveIntensity}
     window._interiorWindows = [];        // P17: 内饰映射窗户材质引用
@@ -256,84 +250,43 @@
                     d
                 )
             );
-            // ===== P20C-I: 天气 uniform 推送 =====
+            // P20C-I: 天气色调偏移 (阴天→灰蓝 / 暴雨→暗紫 / 沙尘→棕黄)
             sd.material.uniforms.uWeatherDarken.value = w.skyDarken;
-            sd.material.uniforms.uWeatherHue.value.copy(
-                new THREE.Color().lerpColors(
-                    new THREE.Color(1.0, 1.0, 1.0),
-                    new THREE.Color(0.72, 0.78, 0.88),
-                    w.skyDarken
-                )
+            const stormHue = new THREE.Color().lerpColors(
+                new THREE.Color(0.65, 0.70, 0.80), // 阴天灰蓝
+                new THREE.Color(0.35, 0.30, 0.45), // 暴雨暗紫
+                Math.min(w.fogBoost * 1.5, 1.0)
             );
-            // P20C-IV: 云底高度 — 雨天/阴天云层压低
-            sd.material.uniforms.uCloudHeight.value = 6.0 - w.rainIntensity * 5.0 - w.skyDarken * 2.0;
+            sd.material.uniforms.uWeatherHue.value.copy(stormHue);
         }
 
-        // 太阳 DirectionalLight：天气削弱
+        // P20C-II: 太阳 DirectionalLight 天气调制增强
         if (window._sun) {
             const sun = window._sun;
             sun.position.set(sunDir.x * 120, sunDir.y * 120, sunDir.z * 120);
-            updateLightIntensity(sun, 3.0, 3.0*lightAtten, 0.12, d);
-            // P20C-II: 阴天方向光偏冷白
-            const overcastSun = new THREE.Color(0xfff0d0).lerp(new THREE.Color(0xc8d8f0), w.skyDarken);
-            updateLightColor(sun, overcastSun.getHex(), 0x445577, d);
-            // P20C-II: 阴影半径天气联动 — 阴天软阴影
-            sun.shadow.radius = 4 + w.skyDarken * 8;
+            // 阴天削弱更强 + 雨天色温冷移
+            const stormAtten = lightAtten * (1 - w.fogBoost * 0.4);
+            updateLightIntensity(sun, 3.0, 3.0*stormAtten, 0.10, d);
+            // 天气色温：晴天暖黄 → 阴天灰 → 暴风雨冷靛
+            const sunDay = new THREE.Color().lerpColors(
+                new THREE.Color(0xfff0d0), new THREE.Color(0x8899bb), w.skyDarken
+            );
+            const sunNight = new THREE.Color().lerpColors(
+                new THREE.Color(0x445577), new THREE.Color(0x1a1a33), w.skyDarken
+            );
+            updateLightColor(sun, sunDay.getHex(), sunNight.getHex(), d);
         }
-
-        // ===== P25A: 双曲线式环境光过渡 + 月光 =====
-        // smoothstep 让昼夜过渡更自然：白天保持高亮、黄昏快速下降、夜间平缓
-        const nightSmooth = d < 0.5 ? (1.0 - Math.pow(d / 0.5, 0.55)) : 0.0; // 0=白天, 1=纯夜
-        window._nightSmooth = nightSmooth;
-        const dayAtten = 1.0 - nightSmooth;
 
         if (ambient) {
-            // 夜间环境光：保留微弱冷蓝 bounce，而非完全压黑
-            const ambNightIntensity = 0.08 + nightSmooth * 0.03;
-            ambient.intensity = (0.45 * dayAtten + ambNightIntensity) * (1 - w.skyDarken * 0.45);
-            const ambDay = new THREE.Color(0x8a7a6a), ambNight = new THREE.Color(0x1a2a3a);
-            ambient.color.copy(ambDay).lerp(ambNight, nightSmooth);
+            updateLightIntensity(ambient, 0.45, 0.45*lightAtten, 0.06, d);
+            updateLightColor(ambient, 0x8a7a6a, 0x223344, d);
         }
         if (hemi) {
-            hemi.intensity = (0.6 * dayAtten + nightSmooth * 0.08) * (1 - w.skyDarken * 0.45);
-            const hemiSkyDay = new THREE.Color(0x9ec5e8), hemiSkyNight = new THREE.Color(0x0d1a2a);
-            const hemiGndDay = new THREE.Color(0x3a2a1a), hemiGndNight = new THREE.Color(0x050810);
-            // HemisphereLight color 由 sky + ground 组成, 这里简化处理 skyColor
-            hemi.color.copy(hemiSkyDay).lerp(hemiSkyNight, nightSmooth);
+            updateLightIntensity(hemi, 0.30, 0.30*lightAtten, 0.06, d);
+            updateLightColor(hemi, 0x9ec5e8, 0x112233, d);
         }
-        const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c !== window._moonLight && c.intensity < 1);
-        if (fill) {
-            fill.intensity = 0.55 * dayAtten + nightSmooth * 0.04;
-        }
-
-        // P25A: 月光（冷蓝白方向光，夜间渐显，模拟月光照射建筑）
-        if (window._moonLight) {
-            const ml = window._moonLight;
-            // 月亮方向：与太阳相反
-            const moonDir = new THREE.Vector3(-sunDir.x * 0.7, 0.25 + nightSmooth * 0.15, -sunDir.z * 0.7).normalize();
-            ml.position.set(moonDir.x * 100, moonDir.y * 100, moonDir.z * 100);
-            ml.intensity = nightSmooth * 0.28 * (1 - w.skyDarken * 0.4);
-            const moonColor = new THREE.Color().lerpColors(
-                new THREE.Color(0x223344), new THREE.Color(0x8899cc), nightSmooth
-            );
-            ml.color.copy(moonColor);
-        }
-
-        // P25A: Bloom 日夜联动（夜间阈值低/强度高/半径大，霓虹灯更突出）
-        if (window._bloom && !isMobile) {
-            const cfg = QUALITY_PRESETS[qualityPreset];
-            const nightBloomStr = cfg.bloomStrength + nightSmooth * 0.7;
-            const nightBloomThresh = 0.55 - nightSmooth * 0.22;
-            const nightBloomRadius = 0.78 + nightSmooth * 0.12;
-            window._bloom.strength = cfg.bloomStrength * (1 - nightSmooth) + nightBloomStr * nightSmooth;
-            window._bloom.threshold = nightBloomThresh;
-            window._bloom.radius = nightBloomRadius;
-        }
-        if (window._bloom && isMobile) {
-            window._bloom.strength = 0.3 + nightSmooth * 0.7;
-            window._bloom.threshold = 0.55 - nightSmooth * 0.25;
-            window._bloom.radius = 0.78 + nightSmooth * 0.15;
-        }
+        const fill = scene.children.find(c => c.isDirectionalLight && c !== sun && c !== hemi && c.intensity < 1);
+        if (fill) updateLightIntensity(fill, 0.55, 0.55*lightAtten, 0.04, d);
 
         // 雾色 + 天气雾增强 + 季节
         const fogDay = new THREE.Color(0x7a9ab8), fogNight = new THREE.Color(0x0a0e14);
@@ -345,15 +298,14 @@
         const seasFog = new THREE.Color(SEASON.lerped.fogHue);
         fogFinal.lerp(seasFog, 0.25);
         if (scene.fog) scene.fog.color.copy(fogFinal);
-        if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015 + w.fogBoost * 0.006;
-        if (scene.fog instanceof THREE.Fog) scene.fog.far = 700 - w.fogBoost * 200;
+        if (scene.fog instanceof THREE.Fog) scene.fog.far = 400 - w.fogBoost * 150;
 
         if (window._fogPlane) {
             const fp = window._fogPlane;
             fp.material.uniforms.uColor.value.copy(fogFinal).multiplyScalar(0.6);
             fp.material.uniforms.uFogColor.value.copy(fogFinal);
             fp.material.uniforms.uTime && (fp.material.uniforms.uTime.value += dt * (1 + w.rainIntensity * 2));
-            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(WEATHER.wind.force * 1.5, WEATHER.wind.force * 1.8);
+            fp.material.uniforms.uWind && fp.material.uniforms.uWind.value.set(w.wind.force * 1.5, w.wind.force * 1.8);
         }
 
         // Tone mapping
@@ -377,11 +329,9 @@
 
         // ==== 季节地面色调 ====
         if (window._terrain && window._terrain.material && window._terrain.material.color) {
-            const tm = window._terrain.material;
-            const tc = tm.color;
-            tm.userData = tm.userData || {};
-            if (tm.userData._origTerrainColor === undefined) tm.userData._origTerrainColor = tc.getHex();
-            const orig = new THREE.Color(tm.userData._origTerrainColor);
+            const tc = window._terrain.material.color;
+            if (tc.userData._origTerrainColor === undefined) tc.userData._origTerrainColor = tc.getHex();
+            const orig = new THREE.Color(tc.userData._origTerrainColor);
             const seasTint = new THREE.Color(SEASON.lerped.groundTint);
             tc.copy(orig).lerp(seasTint, 0.35);
         }
@@ -559,12 +509,6 @@
         }
     }
 
-    // ===== P20C-III: 全屏闪白状态机 =====
-    const boltSystem = {
-        flash: 0,              // 闪屏强度 (0~1)
-        decay: 8.0,            // 衰减速度
-    };
-
     // ---- 闪电 ----
     let boltLine = null, boltGlow = null, boltLight = null;
     function generateBolt(start, end, displace, branches) {
@@ -630,10 +574,17 @@
         boltLight.position.copy(midPt);
         boltLight.intensity = 80;
 
-        // P20C-III: 全屏闪白 (LightningShader)
-        boltSystem.flash = 1.0;
+        // SkyDome 闪白
+        if (window._skyDome) {
+            const origSun = window._skyDome.material.uniforms.uSunColor.value.getHex();
+            window._skyDome.material.uniforms.uSunColor.value.set(0xffffff);
+            setTimeout(() => {
+                if (window._skyDome) window._skyDome.material.uniforms.uSunColor.value.setHex(origSun);
+            }, 80);
+        }
 
         // 闪电衰减
+        if (window._flashPass) window._flashPass.uniforms.uFlash.value = 1.0;
         const decayStart = performance.now();
         function decayBolt() {
             const elapsed = (performance.now() - decayStart) / 1000;
@@ -641,11 +592,13 @@
             if (boltLine) boltLine.material.opacity = fade * 0.9;
             if (boltGlow) boltGlow.material.opacity = fade * 0.3;
             if (boltLight) boltLight.intensity = 80 * fade;
+            if (window._flashPass) window._flashPass.uniforms.uFlash.value = fade;
             if (elapsed < 0.35) { requestAnimationFrame(decayBolt); }
             else {
                 if (boltLine) { scene.remove(boltLine); boltLine.geometry.dispose(); boltLine.material.dispose(); boltLine=null; }
                 if (boltGlow) { scene.remove(boltGlow); boltGlow.geometry.dispose(); boltGlow.material.dispose(); boltGlow=null; }
                 if (boltLight) boltLight.intensity = 0;
+                if (window._flashPass) window._flashPass.uniforms.uFlash.value = 0.0;
             }
         }
         requestAnimationFrame(decayBolt);
@@ -1420,7 +1373,7 @@
                 tasks.push((async () => {
                     try {
                         const url = `assets/textures/${setName}/${chDef.file}`;
-                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 8000);
+                        const t = await _withTimeout(new THREE.TextureLoader().loadAsync(url), 30000);
                         chDef.setFn(t, tex);
                         t.wrapS = t.wrapT = THREE.RepeatWrapping;
                         t.anisotropy = 8;
@@ -1465,7 +1418,7 @@
                 try {
                     const tex = await Promise.race([
                         loader.loadAsync(`assets/hdr/${key}.hdr`),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
                     ]);
                     hdrKeys[key] = tex;
                 } catch(e) { delete hdrKeys[key]; }
@@ -1556,7 +1509,6 @@
 
     // ---- 引擎初始化（完整保留） ----
     function initEngine() {
-        const _t0 = performance.now();
         try {
             var _testCanvas = document.createElement('canvas');
             var _testGL = _testCanvas.getContext('webgl2') || _testCanvas.getContext('webgl') || _testCanvas.getContext('experimental-webgl');
@@ -1595,7 +1547,6 @@
         renderer.toneMappingExposure = 1.15;
         renderer.outputColorSpace = THREE.SRGBColorSpace;
         document.body.appendChild(renderer.domElement);
-        console.log('[perf] renderer init', (performance.now() - _t0).toFixed(0), 'ms');
 
         // ===== 自定义天空穹顶着色器 =====
         const skyDomeGeo = new THREE.SphereGeometry(100, 32, 16);
@@ -1609,13 +1560,9 @@
                 uGroundColor: { value: new THREE.Color(0.02, 0.01, 0.02) },
                 uCloudCover: { value: 0.5 },
                 uWeatherDarken: { value: 0.0 },
-                uWeatherHue: { value: new THREE.Color(1.0, 1.0, 1.0) },
-                uCloudHeight: { value: 6.0 },
-                uSunColor: { value: new THREE.Color(1.0, 0.95, 0.85) },
-                uZenithColor: { value: new THREE.Color(0.15, 0.3, 0.85) },
-                uHorizonColor: { value: new THREE.Color(0.55, 0.7, 1.0) }
+                uWeatherHue: { value: new THREE.Color(0xffffff) }
             },
-            // ===== P18 大气散射天空穹顶 =====
+            // ===== P18+P20C-I 大气散射天空穹顶 (天气色调适配) =====
             vertexShader: `
                 varying vec3 vWorldPosition;
                 void main() {
@@ -1636,10 +1583,6 @@
                 uniform float uCloudCover;
                 uniform float uWeatherDarken;
                 uniform vec3 uWeatherHue;
-                uniform float uCloudHeight;
-                uniform vec3 uSunColor;
-                uniform vec3 uZenithColor;
-                uniform vec3 uHorizonColor;
                 varying vec3 vWorldPosition;
 
                 const float PI = 3.14159265359;
@@ -1702,10 +1645,10 @@
                     vec3 rayleighScatter = betaR * rayleighOpticalDepth * rayleighPhase(cosViewSun) * vec3(1.0, 0.95, 0.9) * rayleighExt;
                     float mieScatter = mieOpticalDepth * hgPhase(cosViewSun, MIE_G) * 0.06 * mieExt * uTurbidity;
 
-                    // 天顶/地平线色由 JS 端 P20C 动态传入（季节+天气自适应）
+                    // 天顶色随太阳高度变化
                     float sunsetBlend = 1.0 - smoothstep(-0.15, 0.25, sunY);
-                    vec3 zenithColor = uZenithColor;
-                    vec3 horizonColor = uHorizonColor;
+                    vec3 zenithColor = mix(vec3(0.15, 0.3, 0.85), vec3(0.25, 0.15, 0.55), sunsetBlend * 0.7);
+                    vec3 horizonColor = mix(vec3(0.55, 0.7, 1.0), vec3(1.0, 0.45, 0.18), sunsetBlend);
 
                     // 基础天空：高度渐变 + 散射
                     float horizonFade = pow(1.0 - max(viewHeight, 0.0), 0.55);
@@ -1726,14 +1669,13 @@
 
                     // ===== 太阳盘 =====
                     float sunDisk = smoothstep(0.99945, 1.0, cosViewSun);
-                    vec3 sunCoreColor = uSunColor * sunDisk * 6.0;
+                    vec3 sunCoreColor = vec3(1.0, 0.95, 0.85) * sunDisk * 6.0;
                     float sunInnerGlow = pow(cosViewSun + 0.15, 32.0) * 0.6;
-                    vec3 sunGlowColor = uSunColor * 0.85 * sunInnerGlow;
+                    vec3 sunGlowColor = vec3(1.0, 0.85, 0.55) * sunInnerGlow;
                     skyColor += (sunCoreColor + sunGlowColor) * uDayness;
 
                     // ===== 云层 =====
-                    float cloudDist = 30.0 - uCloudHeight * 3.0;
-                    vec3 cloudPos = dir * max(1.0, cloudDist) + vec3(uTime * 0.04, 0.0, uTime * 0.02);
+                    vec3 cloudPos = dir * 30.0 + vec3(uTime * 0.04, 0.0, uTime * 0.02);
                     float cloudNoise = fbm(cloudPos);
                     float cloudDensity = smoothstep(0.35, 0.72, cloudNoise) * uDayness * uCloudCover;
                     float cloudSunEdge = pow(max(dot(dir, sunDir), 0.0), 6.0);
@@ -1767,16 +1709,15 @@
                         skyColor = mix(uGroundColor, horizonColor * 0.7, groundBlend);
                     }
 
-                    // ===== P20C-I: 天气色调偏移（阴天偏冷灰 + 亮度压暗） =====
-                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.7);
-                    skyColor *= 1.0 - uWeatherDarken * 0.35;
-
                     // ===== HDR 色调映射 =====
+                    // P20C-I: 天气色调偏移
+                    skyColor = mix(skyColor, skyColor * mix(vec3(1.0), vec3(0.45, 0.50, 0.65), uWeatherDarken), uWeatherDarken * 0.8);
+                    skyColor = mix(skyColor, skyColor * uWeatherHue, uWeatherDarken * 0.3);
                     skyColor = skyColor / (skyColor * uExposure + vec3(1.0));
                     skyColor = pow(skyColor, vec3(1.0/2.2));
                     gl_FragColor = vec4(skyColor, 1.0);
                 }
-            `,
+            `
             side: THREE.BackSide,
             depthWrite: false
         });
@@ -1784,20 +1725,16 @@
         skyDome.name = 'skyDome';
         scene.add(skyDome);
         window._skyDome = skyDome;
-        console.log('[perf] skyDome created', (performance.now() - _t0).toFixed(0), 'ms');
 
-        // ===== IBL (移动端跳过以加快初始化) =====
-        if (!isMobile) {
-            try {
-                const pmrem = new THREE.PMREMGenerator(renderer);
-                pmrem.compileEquirectangularShader();
-                const envRT = pmrem.fromScene(skyDome, 0.04);
-                scene.environment = envRT.texture;
-                window._envRT = envRT;
-                pmrem.dispose();
-            } catch(e){ console.warn('IBL failed', e); }
-        }
-        console.log('[perf] IBL done', (performance.now() - _t0).toFixed(0), 'ms');
+        // ===== IBL =====
+        try {
+            const pmrem = new THREE.PMREMGenerator(renderer);
+            pmrem.compileEquirectangularShader();
+            const envRT = pmrem.fromScene(skyDome, 0.04);
+            scene.environment = envRT.texture;
+            window._envRT = envRT;
+            pmrem.dispose();
+        } catch(e){ console.warn('IBL failed', e); }
 
         // 三点光 + 半球光
         ambient = new THREE.AmbientLight(0x8a7a6a, 0.45);
@@ -1821,15 +1758,44 @@
         rim.position.set(0, 20, -120);
         scene.add(rim);
 
-        // P25A: 月光 DirectionalLight（冷蓝白，仅夜间启用）
-        const moonLight = new THREE.DirectionalLight(0x8899cc, 0.0);
-        moonLight.position.set(60, 30, 60);
-        moonLight.castShadow = false;
-        scene.add(moonLight);
-        window._moonLight = moonLight;
-        console.log('[perf] lights done', (performance.now() - _t0).toFixed(0), 'ms');
+        // 后处理
+        if (isMobile) {
+            try { rebuildMobileBloom(); } catch(e) { composer = null; }
+        } else {
+            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
+                console.warn('EffectComposer init failed', e); composer = null;
+            }
+        }
+
+        clock = new THREE.Clock();
 
         // ---- P20B-III: Wet Lens Shader ----
+        // P20C-III: Lightning Flash Shader (全屏闪白)
+        const LightningFlashShader = {
+            uniforms: {
+                tDiffuse: { value: null },
+                uFlash: { value: 0.0 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform float uFlash;
+                varying vec2 vUv;
+                void main() {
+                    vec4 color = texture2D(tDiffuse, vUv);
+                    float flash = smoothstep(0.0, 0.3, uFlash) * (1.0 - smoothstep(0.5, 1.0, uFlash));
+                    color.rgb = mix(color.rgb, vec3(1.0, 0.98, 0.92), flash * 0.55);
+                    gl_FragColor = color;
+                }
+            `
+        };
+
         const WetLensShader = {
             uniforms: {
                 tDiffuse: { value: null },
@@ -1909,18 +1875,6 @@
             `,
         };
 
-        // 后处理
-        if (isMobile) {
-            try { rebuildMobileBloom(); } catch(e) { composer = null; }
-        } else {
-            try { rebuildPostPipeline(QUALITY_PRESETS[qualityPreset]); } catch(e) {
-                console.warn('EffectComposer init failed', e); composer = null;
-            }
-        }
-        console.log('[perf] post-processing done', (performance.now() - _t0).toFixed(0), 'ms');
-
-        clock = new THREE.Clock();
-
         function rebuildPostPipeline(cfg) {
             if (!renderer || isMobile) { composer = null; return; }
             if (!cfg.post) { composer = null; return; }
@@ -1975,20 +1929,12 @@
                 window._wetLens = wetLensPass;
             } catch (e) { console.warn('WetLensPass failed, skip', e); }
 
-            // P20C-III: Lightning Full-Screen Flash
+            // P20C-III: Lightning Flash
             try {
-                const LightningShader = {
-                    uniforms: {
-                        tDiffuse: { value: null },
-                        uFlash: { value: 0 },
-                    },
-                    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-                    fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uFlash; void main() { vec4 tex = texture2D(tDiffuse, vUv); gl_FragColor = mix(tex, vec4(1.0), uFlash * 0.85); }`,
-                };
-                const lightningPass = new ShaderPass(LightningShader);
-                composer.addPass(lightningPass);
-                window._lightningPass = lightningPass;
-            } catch (e) { console.warn('LightningPass failed, skip', e); }
+                const flashPass = new ShaderPass(LightningFlashShader);
+                composer.addPass(flashPass);
+                window._flashPass = flashPass;
+            } catch (e) { console.warn('LightningFlashPass failed, skip', e); }
 
             outputPass = new OutputPass();
             composer.addPass(outputPass);
@@ -2005,6 +1951,11 @@
                 0.3, 0.4, 0.85
             );
             composer.addPass(bloomPass);
+            try {
+                const flashPass = new ShaderPass(LightningFlashShader);
+                composer.addPass(flashPass);
+                window._flashPass = flashPass;
+            } catch (e) {}
             composer.addPass(new OutputPass());
             window._bloom = bloomPass;
             window._composer = composer;
@@ -2014,7 +1965,6 @@
             window.__game.renderer.attach({ scene, camera, renderer, composer, clock, isMobile });
             window.__game.renderer.syncGlobals();
         }
-        console.log('[perf] initEngine total', (performance.now() - _t0).toFixed(0), 'ms');
     }
 
     // ===== Simplex Noise (P1: 地形生成) =====
@@ -2511,8 +2461,6 @@
                     mesh,
                     nightEmissive: new THREE.Color(dist === 'A' ? 0x8899cc : (dist === 'B' ? 0xffcc66 : 0x665544))
                 });
-                // P25B: 记录建筑位置供霓虹招牌放置
-                window._bldData.push({ cx: parseFloat(cx.toFixed(1)), cz: parseFloat(cz.toFixed(1)), topY: accumY + seg.h, w: seg.w, d: seg.d, dist });
                 accumY += seg.h;
             }
 
@@ -2961,219 +2909,6 @@
         return furnGroup.children.length;
     }
 
-    // ===== P25B: 霓虹招牌 + GTA V 双层 Billboard 辉光系统 =====
-    function createNeonSystem() {
-        // ---- 辉光 blob 纹理（Canvas 128×128 径向渐变） ----
-        const blobCanvas = document.createElement('canvas');
-        blobCanvas.width = 128; blobCanvas.height = 128;
-        const bctx = blobCanvas.getContext('2d');
-        const bgrad = bctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        bgrad.addColorStop(0, 'rgba(255,255,255,1)');
-        bgrad.addColorStop(0.08, 'rgba(255,255,255,0.95)');
-        bgrad.addColorStop(0.2, 'rgba(255,255,255,0.7)');
-        bgrad.addColorStop(0.45, 'rgba(255,255,255,0.25)');
-        bgrad.addColorStop(0.7, 'rgba(255,255,255,0.04)');
-        bgrad.addColorStop(1, 'rgba(255,255,255,0)');
-        bctx.fillStyle = bgrad; bctx.fillRect(0, 0, 128, 128);
-        const blobTex = new THREE.CanvasTexture(blobCanvas);
-        blobTex.needsUpdate = true;
-
-        const billboardMatA = new THREE.MeshBasicMaterial({
-            map: blobTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide
-        });
-        const billboardMatB = billboardMatA.clone();
-        const billboardGeo = new THREE.PlaneGeometry(2, 2);
-
-        // ---- 赛博朋克色板 ----
-        const cyberColors = [0xff00ff, 0x0080ff, 0x39ff14, 0x00ffff, 0xff1493, 0xffaa00, 0xff3366, 0x00ffcc];
-
-        // ---- 霓虹招牌 Canvas 纹理（预生成 8 个） ----
-        const neonTexts = ['霓虹城', '酒吧', '光', 'CYBER', '开放', '24H', '龍', 'CLUB'];
-        const neonTexs = [];
-        for (let i = 0; i < neonTexts.length; i++) {
-            const nc = document.createElement('canvas');
-            nc.width = 256; nc.height = 64;
-            const nctx = nc.getContext('2d');
-            // 背景透明
-            nctx.clearRect(0, 0, 256, 64);
-            // 光晕 (外发光)
-            nctx.shadowColor = '#' + cyberColors[i % cyberColors.length].toString(16).padStart(6, '0');
-            nctx.shadowBlur = 18;
-            nctx.font = 'bold 36px "PingFang SC","Microsoft YaHei",sans-serif';
-            nctx.fillStyle = '#' + cyberColors[i % cyberColors.length].toString(16).padStart(6, '0');
-            nctx.textAlign = 'center';
-            nctx.fillText(neonTexts[i], 128, 44);
-            // 再画一层白色加强中心亮度
-            nctx.shadowBlur = 4;
-            nctx.shadowColor = 'rgba(255,255,255,0.6)';
-            nctx.fillStyle = 'rgba(255,255,255,0.85)';
-            nctx.fillText(neonTexts[i], 128, 44);
-            const tex = new THREE.CanvasTexture(nc);
-            tex.needsUpdate = true;
-            neonTexs.push(tex);
-        }
-
-        // ---- A. GTA V 双层 Billboard：路灯辉光 ----
-        const lampPositions = [];
-        for (const lamp of window._lampLights) {
-            lampPositions.push(lamp.position.clone());
-        }
-        const lampCount = lampPositions.length;
-        let lampBillboardA = null, lampBillboardB = null;
-
-        if (lampCount > 0) {
-            const lampGeo = new THREE.PlaneGeometry(3.5, 3.5);
-            lampBillboardA = new THREE.InstancedMesh(lampGeo, billboardMatA, lampCount);
-            lampBillboardB = new THREE.InstancedMesh(lampGeo, billboardMatB, lampCount);
-            lampBillboardA.name = 'lampBillboardA';
-            lampBillboardB.name = 'lampBillboardB';
-
-            const dummy = new THREE.Object3D();
-            for (let i = 0; i < lampCount; i++) {
-                const pos = lampPositions[i];
-                dummy.position.copy(pos);
-                dummy.position.y += 0.3;
-                dummy.scale.setScalar(0.01); // 初始极小（白天不可见）
-                dummy.updateMatrix();
-                lampBillboardA.setMatrixAt(i, dummy.matrix);
-                // B 层微偏移 + 微旋转
-                dummy.rotation.z = Math.random() * Math.PI * 2;
-                dummy.scale.setScalar(0.01);
-                dummy.position.x += 0.3;
-                dummy.updateMatrix();
-                lampBillboardB.setMatrixAt(i, dummy.matrix);
-            }
-            lampBillboardA.instanceMatrix.needsUpdate = true;
-            lampBillboardB.instanceMatrix.needsUpdate = true;
-            lampBillboardA.renderOrder = 999;
-            lampBillboardB.renderOrder = 999;
-            scene.add(lampBillboardA);
-            scene.add(lampBillboardB);
-        }
-
-        // ---- B. 霓虹招牌 Billboard：高楼顶部 ----
-        const tallBlds = window._bldData.filter(b => b.topY > 25 && b.w > 5);
-        // 去重：同一 cx,cz 只取最高的那条记录
-        const dedup = new Map();
-        for (const b of tallBlds) {
-            const key = `${b.cx.toFixed(0)},${b.cz.toFixed(0)}`;
-            if (!dedup.has(key) || b.topY > dedup.get(key).topY) dedup.set(key, b);
-        }
-        const uniqueBlds = [...dedup.values()];
-        const neonCount = Math.min(uniqueBlds.length, 40);
-        let neonSigns = null;
-
-        const selected = neonCount > 0 ? uniqueBlds.slice(0, neonCount) : [];
-        if (neonCount > 0) {
-            const signGeo = new THREE.PlaneGeometry(6, 1.5);
-            neonSigns = new THREE.InstancedMesh(signGeo, new THREE.MeshBasicMaterial({
-                map: neonTexs[0], transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-                side: THREE.DoubleSide
-            }), neonCount);
-            neonSigns.name = 'neonSigns';
-
-            const dummy = new THREE.Object3D();
-            for (let i = 0; i < neonCount; i++) {
-                const b = selected[i];
-                const texIdx = i % neonTexs.length;
-                const colorIdx = i % cyberColors.length;
-
-                // give each instance its own material via a clone... actually InstancedMesh can do per-instance color
-                neonSigns.setColorAt(i, new THREE.Color(cyberColors[colorIdx]));
-
-                dummy.position.set(b.cx, b.topY + 0.5, b.cz);
-                // Billboard 始终面向相机 → 用 lookAt world origin hack
-                dummy.rotation.set(0, 0, 0);
-                dummy.scale.setScalar(0.01);
-                dummy.updateMatrix();
-                neonSigns.setMatrixAt(i, dummy.matrix);
-            }
-            neonSigns.instanceMatrix.needsUpdate = true;
-            if (neonSigns.instanceColor) neonSigns.instanceColor.needsUpdate = true;
-            neonSigns.renderOrder = 998;
-            scene.add(neonSigns);
-        }
-
-        // P25B优化: 预存霓虹招牌位置，避免运行时 getMatrixAt 回读
-        const _neonSignPositions = selected.length ? selected.map(b => ({
-            x: b.cx, y: b.topY + 0.5, z: b.cz
-        })) : [];
-
-        window._neonSystem = {
-            lampPositions,
-            lampBillboardA, lampBillboardB,
-            neonSigns,
-            _neonSignPositions,
-            blobTex,
-            neonTexs,
-            cyberColors,
-        };
-        console.log(`[P25B] 霓虹系统: ${lampCount} 路灯辉光 + ${neonCount} 霓虹招牌, DC=${(lampBillboardA?2:0)+(neonSigns?1:0)}`);
-    }
-
-    // P25B: 每帧更新 Billboard 朝向相机 + 夜间渐显缩放
-    const _nsDummy = new THREE.Object3D(); // 复用，避免每帧 new
-    function updateNeonSystem(dt) {
-        const ns = window._neonSystem;
-        if (!ns) return;
-        const night = window._nightSmooth || 0;
-        const now = performance.now();
-
-        const cx = camera.position.x;
-        const cz = camera.position.z;
-
-        // ---- 路灯双层 Billboard ----
-        if (ns.lampBillboardA && ns.lampBillboardB) {
-            const positions = ns.lampPositions;
-            const count = positions.length;
-            for (let i = 0; i < count; i++) {
-                const p = positions[i];
-                const angle = Math.atan2(cx - p.x, cz - p.z);
-                const scale = night * (3.5 + Math.sin(i * 1.3 + now * 0.001) * 0.4);
-
-                // A 层
-                _nsDummy.position.set(p.x, p.y + 0.3, p.z);
-                _nsDummy.rotation.set(0, angle, 0);
-                _nsDummy.scale.setScalar(scale);
-                _nsDummy.updateMatrix();
-                ns.lampBillboardA.setMatrixAt(i, _nsDummy.matrix);
-
-                // B 层：微偏移 + 微旋转（模拟 GTA V 双层 glare）
-                _nsDummy.position.x += 0.15;
-                _nsDummy.rotation.set(0, angle, now * 0.0003 + i * 0.7);
-                _nsDummy.scale.setScalar(scale * 0.75);
-                _nsDummy.updateMatrix();
-                ns.lampBillboardB.setMatrixAt(i, _nsDummy.matrix);
-            }
-            ns.lampBillboardA.instanceMatrix.needsUpdate = true;
-            ns.lampBillboardB.instanceMatrix.needsUpdate = true;
-        }
-
-        // ---- 霓虹招牌 Billboard ----
-        if (ns.neonSigns && ns._neonSignPositions) {
-            const positions = ns._neonSignPositions;
-            const count = Math.min(ns.neonSigns.count, positions.length);
-            for (let i = 0; i < count; i++) {
-                const p = positions[i];
-                const angle = Math.atan2(cx - p.x, cz - p.z);
-                const scale = night * (6.0 + Math.sin(i * 0.9 + now * 0.001) * 1.0);
-
-                _nsDummy.position.set(p.x, p.y, p.z);
-                _nsDummy.rotation.set(0, angle, 0);
-                _nsDummy.scale.set(scale, scale * 0.25, 1);
-                _nsDummy.updateMatrix();
-                ns.neonSigns.setMatrixAt(i, _nsDummy.matrix);
-            }
-            ns.neonSigns.instanceMatrix.needsUpdate = true;
-            ns.neonSigns.visible = night > 0.02;
-        }
-
-        // 路灯 billboard 夜间可见
-        if (ns.lampBillboardA) ns.lampBillboardA.visible = night > 0.02;
-        if (ns.lampBillboardB) ns.lampBillboardB.visible = night > 0.02;
-    }
-
     // ===== P10: 行人系统 =====
     const pedestrianStates = [];    // {segIdx, t, speed, state, idleTimer, colorIdx, phase}
     let pedestrianMesh = null;
@@ -3421,7 +3156,7 @@
     // 雾层设置
     function setupFog() {
         // 场景全局雾
-        scene.fog = new THREE.Fog(0x8899aa, 250, 700);
+        scene.fog = new THREE.Fog(0x7a9ab8, 50, 400);
 
         // P20B-III: Ground Fog (height-attenuated + FBM noise + wind drift)
         const fogGeo = new THREE.PlaneGeometry(500, 500);
@@ -3585,7 +3320,7 @@
         groundMat.userData = groundMat.userData || {};
         groundMat.userData._baseRoughness = groundMat.roughness;
         groundMat.userData._baseEnvIntensity = groundMat.envMapIntensity || 0;
-        if (groundMat.color) { groundMat.userData._baseColor = groundMat.color.getHex(); groundMat.userData._origTerrainColor = groundMat.color.getHex(); }
+        if (groundMat.color) groundMat.userData._baseColor = groundMat.color.getHex();
         scene.add(terrain);
         window._terrain = terrain;
 
@@ -3614,10 +3349,6 @@
         // ---- P5: 街道家具 + 雾层 ----
         const furnCount = buildStreetFurniture();
         console.log(`[P5] 街道家具: ${furnCount} 个对象`);
-
-        // ---- P25B: 霓虹招牌 + 双层 Billboard ----
-        createNeonSystem();
-
         setupFog();
         createRainSystem();
         createSplashSystem();
@@ -4043,8 +3774,8 @@
                 }
             }
             shader.uniforms = shader.uniforms || {};
-            shader.uniforms.uFogNear = { value: 250 };
-            shader.uniforms.uFogFar = { value: 800 };
+            shader.uniforms.uFogNear = { value: 120 };
+            shader.uniforms.uFogFar = { value: 500 };
             shader.uniforms.uFogHeightMin = { value: -20 };
             shader.uniforms.uFogHeightMax = { value: 40 };
             shader.uniforms.uFogColor = { value: new THREE.Color(0.82, 0.84, 0.86) };
@@ -4079,8 +3810,7 @@
                 const d = DAYNIGHT.dayness;
                 const sunDir = window._skyDome ? window._skyDome.material.uniforms.uSunDirection.value : new THREE.Vector3(0.5, 0.8, 0.4);
                 const sunY = sunDir.y;
-                const t = Math.max(0, Math.min(1, (sunY - (-0.15)) / (0.25 - (-0.15))));
-                const sunset = 1.0 - t * t * (3.0 - 2.0 * t);
+                const sunset = 1.0 - smoothstep(-0.15, 0.25, sunY);
 
                 // 白天：微蓝白，日落：暖橙，夜间：深蓝灰
                 const dayFog = new THREE.Color(0.82, 0.84, 0.88);
@@ -4144,7 +3874,7 @@
         player.moveSpeed = len * speed;
         player.pos.x += player.vel.x * dt;
         player.pos.z += player.vel.z * dt;
-        player.pos.y = getTerrainH(player.pos.x, player.pos.z) + 1.7;
+        player.pos.y = Math.max(getTerrainH(player.pos.x, player.pos.z) + 1.7, 1.0);
     }
 
     // ---- 相机更新 ----
@@ -4538,6 +4268,85 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             if (composer) composer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        // P21: 手机虚拟摇杆 + 触摸转视角
+        const joyArea = document.getElementById('joyArea');
+        const joyKnob = document.getElementById('joyKnob');
+        if (joyArea && joyKnob) {
+            const r = 70; // 摇杆半径
+            let joyId = null;
+            joyArea.addEventListener('touchstart', e => {
+                if (joyId !== null) return;
+                const t = e.changedTouches[0]; joyId = t.identifier;
+                updateJoy(t);
+                e.preventDefault();
+            }, { passive: false });
+            joyArea.addEventListener('touchmove', e => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === joyId) { updateJoy(e.changedTouches[i]); break; }
+                }
+                e.preventDefault();
+            }, { passive: false });
+            joyArea.addEventListener('touchend', e => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === joyId) { joyId = null; break; }
+                }
+                joyKnob.style.transform = 'translate(-50%,-50%)';
+                const ks = ['KeyW','KeyS','KeyA','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+                ks.forEach(k => keys[k] = false);
+            });
+            const joyRect = () => joyArea.getBoundingClientRect();
+            function updateJoy(t) {
+                const rect = joyRect();
+                let dx = t.clientX - rect.left - rect.width / 2;
+                let dy = t.clientY - rect.top - rect.height / 2;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > r) { dx *= r / dist; dy *= r / dist; }
+                joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                const mx = dx / r, my = -dy / r;
+                keys['KeyW'] = my > 0.2; keys['ArrowUp'] = my > 0.2;
+                keys['KeyS'] = my < -0.2; keys['ArrowDown'] = my < -0.2;
+                keys['KeyA'] = mx < -0.2; keys['ArrowLeft'] = mx < -0.2;
+                keys['KeyD'] = mx > 0.2; keys['ArrowRight'] = mx > 0.2;
+            }
+
+            // 右侧触摸拖拽转视角
+            let camId = null, camLast = null;
+            document.addEventListener('touchstart', e => {
+                if (camId !== null) return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const t = e.changedTouches[i];
+                    // 排除摇杆区域的触摸
+                    const joyR = joyArea.getBoundingClientRect();
+                    if (t.clientX >= joyR.left - 20 && t.clientX <= joyR.right + 20 &&
+                        t.clientY >= joyR.top - 20 && t.clientY <= joyR.bottom + 20) continue;
+                    if (t.clientX < window.innerWidth / 2) continue; // 只取右侧
+                    camId = t.identifier;
+                    camLast = { x: t.clientX, y: t.clientY };
+                    break;
+                }
+            }, { passive: true });
+            document.addEventListener('touchmove', e => {
+                if (camId === null) return;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const t = e.changedTouches[i];
+                    if (t.identifier !== camId) continue;
+                    const dx = t.clientX - camLast.x;
+                    const dy = t.clientY - camLast.y;
+                    player.yaw -= dx * 0.004;
+                    player.pitch -= dy * 0.004;
+                    player.pitch = U.clamp(player.pitch, -1.0, 0.6);
+                    camLast = { x: t.clientX, y: t.clientY };
+                    break;
+                }
+                e.preventDefault();
+            }, { passive: false });
+            document.addEventListener('touchend', e => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === camId) { camId = null; camLast = null; break; }
+                }
+            });
+        }
     }
 
 
@@ -4551,37 +4360,23 @@
     // ---- 主循环 ----
     function animate() {
         requestAnimationFrame(animate);
-        try {
         const dt = Math.min(clock.getDelta(), 0.05);
 
-        // DIAG: 最先更新 info（确保即使后续崩溃也能看到）
-        if (camera && scene) {
-            document.getElementById('info').textContent = `v15.8 | fps:${Math.round(1/dt)} | cam(${camera.position.x.toFixed(1)},${camera.position.y.toFixed(1)},${camera.position.z.toFixed(1)}) | obj:${scene.children.length} | rnd:${renderer?1:0} | sky:${window._skyDome?1:0} | ter:${window._terrain?1:0}`;
-        }
-
         if (gameStarted && !gamePaused) {
-            try { updateSeasons(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSeasons: '+e.message; return; }
-            try { updateWeather(dt); } catch(e) { document.getElementById('info').textContent='ERR updateWeather: '+e.message; return; }
-            try { updateDayNight(dt); } catch(e) { document.getElementById('info').textContent='ERR updateDayNight: '+e.message; return; }
-            try { updatePlayer(dt); } catch(e) { document.getElementById('info').textContent='ERR updatePlayer: '+e.message; return; }
-            try { updatePedestrians(dt); } catch(e) { document.getElementById('info').textContent='ERR updatePedestrians: '+e.message; return; }
+            updateSeasons(dt);
+            updateWeather(dt);
+            updateDayNight(dt);
+            updatePlayer(dt);
+            updatePedestrians(dt);
         }
-        try { updateRainSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateRainSystem: '+e.message; return; }
-        try { updateSplashSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSplashSystem: '+e.message; return; }
-        try { updateLeafSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateLeafSystem: '+e.message; return; }
-        try { updateSnowSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateSnowSystem: '+e.message; return; }
-        try { updateTrees(dt); } catch(e) { document.getElementById('info').textContent='ERR updateTrees: '+e.message; return; }
-        try { updateCityAudio(dt); } catch(e) { document.getElementById('info').textContent='ERR updateCityAudio: '+e.message; return; }
-        try { updateWater(dt); } catch(e) { document.getElementById('info').textContent='ERR updateWater: '+e.message; return; }
-        try { updateAtmosphere(dt); } catch(e) { document.getElementById('info').textContent='ERR updateAtmosphere: '+e.message; return; }
-        try { updateNeonSystem(dt); } catch(e) { document.getElementById('info').textContent='ERR updateNeonSystem: '+e.message; return; }
-        // P20C-III: 闪电闪屏衰减
-        if (boltSystem.flash > 0.001) {
-            boltSystem.flash = Math.max(0, boltSystem.flash - dt * boltSystem.decay);
-            if (window._lightningPass) {
-                window._lightningPass.uniforms.uFlash.value = boltSystem.flash;
-            }
-        }
+        updateRainSystem(dt);
+        updateSplashSystem(dt);
+        updateLeafSystem(dt);
+        updateSnowSystem(dt);
+        updateTrees(dt);
+        updateCityAudio(dt);
+        updateWater(dt);
+        updateAtmosphere(dt);
         updateCamera();
 
         // P12: 每 30 秒自动存档
@@ -4606,18 +4401,15 @@
         }
 
         // P19: 每帧渲染反射贴图（先于主渲染，确保建筑/天空被镜像相机捕获）
-        try { renderReflection(); } catch(e) { console.error('renderReflection fail', e.message); }
+        renderReflection();
 
-        try {
-            if (composer) composer.render();
-            else if (renderer) renderer.render(scene, camera);
-        } catch(e) {
-            document.getElementById('info').textContent = 'RENDER ERR: ' + e.message;
-        }
+        if (composer) composer.render();
+        else if (renderer) renderer.render(scene, camera);
 
-        } catch(e) {
-            document.getElementById('info').textContent = 'ANI ERR: ' + e.message;
-        }
+        // 显示 FPS + dayness + 天气
+        const wName = WEATHER.lerped.rainIntensity > 0.05 ? WEATHER.target : (WEATHER.current !== WEATHER.target ? WEATHER.target : WEATHER.current);
+        const seasInfo = `${SEASON.name}`;
+        document.getElementById('info').textContent = `v15.3 P20B-III | FPS: ${Math.round(1/dt)} | ${DAYNIGHT.dayness>0.5?'☀':'🌙'} ${(DAYNIGHT.dayness*100).toFixed(0)}% | ${seasInfo} | ${wName}`;
     }
 
     // ---- 启动 ----
@@ -4714,7 +4506,7 @@
     }, 12000);
 
     init();
-    console.log('星渊城 v15.8 P20C 光照氛围自适应 加载完成');
+    console.log('星渊城 v16.0 P21 虚拟摇杆 加载完成');
 </script>
 </body></html>
 
