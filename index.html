@@ -146,10 +146,10 @@
     let shadowQuality = isMobile ? 512 : 2048;
 
     const QUALITY_PRESETS = {
-        0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.35, ssao: false,  ssaoRadius: 0.0, post: false },
-        1: { name: '均衡', pixelRatioCap: 1.5, shadow: 512, bloomStrength: 0.6, ssao: true,  ssaoRadius: 0.4, post: true },
-        2: { name: '高质', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 0.85, ssao: true, ssaoRadius: 0.7, post: true },
-        3: { name: '极致', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 1.1, ssao: true, ssaoRadius: 0.9, post: true }
+        0: { name: '流畅', pixelRatioCap: 1.0, shadow: 512,  bloomStrength: 0.2, ssao: false,  ssaoRadius: 0.0, post: false },
+        1: { name: '均衡', pixelRatioCap: 1.5, shadow: 512, bloomStrength: 0.35, ssao: true,  ssaoRadius: 0.4, post: true },
+        2: { name: '高质', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 0.5, ssao: true, ssaoRadius: 0.7, post: true },
+        3: { name: '极致', pixelRatioCap: 2.0,  shadow: 2048, bloomStrength: 0.7, ssao: true, ssaoRadius: 0.9, post: true }
     };
 
     function applyQualityPreset(p) {
@@ -346,7 +346,7 @@
         fogFinal.lerp(seasFog, 0.25);
         if (scene.fog) scene.fog.color.copy(fogFinal);
         if (scene.fog instanceof THREE.FogExp2) scene.fog.density = 0.0055 - d * 0.0015 + w.fogBoost * 0.006;
-        if (scene.fog instanceof THREE.Fog) scene.fog.far = 700 - w.fogBoost * 200;
+        if (scene.fog instanceof THREE.Fog) scene.fog.far = 1000 - w.fogBoost * 200;
 
         if (window._fogPlane) {
             const fp = window._fogPlane;
@@ -3421,7 +3421,7 @@
     // 雾层设置
     function setupFog() {
         // 场景全局雾
-        scene.fog = new THREE.Fog(0x8899aa, 250, 700);
+        scene.fog = new THREE.Fog(0x6a8aaa, 400, 1000);
 
         // P20B-III: Ground Fog (height-attenuated + FBM noise + wind drift)
         const fogGeo = new THREE.PlaneGeometry(500, 500);
@@ -3432,7 +3432,7 @@
                 uColor: { value: new THREE.Color(0x8899bb) },
                 uFogColor: { value: new THREE.Color(0x8899aa) },
                 uMaxHeight: { value: 18 },
-                uDensity: { value: 0.35 },
+                uDensity: { value: 0.18 },
                 uWind: { value: new THREE.Vector2(0, 0) },
             },
             vertexShader: `
