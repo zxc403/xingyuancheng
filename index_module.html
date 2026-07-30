@@ -2200,7 +2200,7 @@
     // ---- PBR 纹理加载（Canvas 程序化生成版） ----
     async function loadRealTextures() {
         const allSets = ['asphalt', 'forest', 'plank', 'rocky', 'brick', 'concrete', 'metal', 'iron', 'paving'];
-        const sets = (window._isMobile) ? ['asphalt', 'plank', 'rocky', 'concrete', 'paving'] : allSets;
+        const sets = (window._isMobile) ? ['asphalt', 'brick', 'metal', 'plank', 'rocky', 'concrete', 'paving'] : allSets;
         const out = {};
 
         // 生成 Canvas 纹理
@@ -2840,6 +2840,12 @@
                 const wallHash = ((Math.abs(cx * 127.1) * 1000 + Math.abs(cz * 311.7) * 1000) % 100) / 100;
                 const wallKey = wallKeys[Math.floor(wallHash * wallKeys.length)];
                 const wallTex = (wallRT && wallRT[wallKey] && wallRT[wallKey].map) ? wallRT[wallKey].map : null;
+                if (!window._texLog) { window._texLog = {brick:0,metal:0,plank:0,noWall:0}; window._texLogDone = false; }
+                if (wallTex) { window._texLog[wallKey] = (window._texLog[wallKey]||0)+1; } else { window._texLog.noWall++; }
+                if (!window._texLogDone && (window._texLog.brick+window._texLog.metal+window._texLog.plank+window._texLog.noWall > 20)) {
+                    console.log('[A345] 墙面纹理分配:',JSON.stringify(window._texLog),'wallRT keys:',wallRT?Object.keys(wallRT).join(','):'null');
+                    window._texLogDone = true;
+                }
                 if (wallTex) {
                     const repH = Math.max(1, Math.floor(seg.h / 3));
                     const repW = Math.max(1, Math.floor(Math.max(seg.w, seg.d) / 3));
