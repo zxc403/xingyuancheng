@@ -2834,17 +2834,24 @@
                 const geo = new THREE.BoxGeometry(seg.w, seg.h, seg.d);
                 const color = dp.colors[seg.colorIdx % dp.colors.length];
                 const matOpts = {color, roughness:0.6, metalness:0.3};
-                // P5: 应用立面窗格纹理
-                const fTex = facadeTextures[dist];
-                if (fTex) {
-                    matOpts.map = fTex;
-                    // 让纹理在建筑立面上正确重复
-                    const repH = Math.max(1, Math.floor(seg.h / 4));
+                // A3/A4/A5: 按建筑哈希选 Canvas 墙面纹理（砖墙/金属/木板）
+                const wallRT = window._realTex;
+                const wallKeys = ['brick', 'metal', 'plank'];
+                const wallHash = ((Math.abs(cx * 127.1) * 1000 + Math.abs(cz * 311.7) * 1000) % 100) / 100;
+                const wallKey = wallKeys[Math.floor(wallHash * wallKeys.length)];
+                const wallTex = (wallRT && wallRT[wallKey] && wallRT[wallKey].map) ? wallRT[wallKey].map : null;
+                if (wallTex) {
+                    const repH = Math.max(1, Math.floor(seg.h / 3));
                     const repW = Math.max(1, Math.floor(Math.max(seg.w, seg.d) / 3));
-                    const repTex = fTex.clone();
+                    const repTex = wallTex.clone();
                     repTex.needsUpdate = true;
                     repTex.repeat.set(repW, repH);
                     matOpts.map = repTex;
+                }
+                // P5: 部分建筑叠加窗户立面 (30%)
+                const fTex = (wallHash < 0.3) ? facadeTextures[dist] : null;
+                if (fTex) {
+                    if (!matOpts.map) { matOpts.map = fTex; }
                 }
                 const mat = new THREE.MeshStandardMaterial(matOpts);
                 const mesh = new THREE.Mesh(geo, mat);
